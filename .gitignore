@@ -1,5 +1,3 @@
-data/ 
-#biar data tidak ke publish di github
 # Excel temporary / lock files
 ~$*.xlsx
 ~$*.xls
