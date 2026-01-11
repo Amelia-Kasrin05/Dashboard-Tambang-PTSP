@@ -1,0 +1,18 @@
+# Excel temporary / lock files
+~$*.xlsx
+~$*.xls
+
+
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Env
+.env
