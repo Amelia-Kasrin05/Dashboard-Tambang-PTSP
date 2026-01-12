@@ -20,14 +20,14 @@ def load_produksi():
         if os.path.exists(file_path):
             try:
                 df = pd.read_excel(file_path, sheet_name='Tahun 2025')
-                st.success(f"✅ Loaded: {file_path}")
+                # File loaded successfully
                 break
             except Exception as e:
-                st.error(f"Error reading {file_path}: {e}")
+                pass
                 continue
     
     if df is None:
-        st.error(f"❌ File produksi tidak ditemukan")
+        # File not found
         return pd.DataFrame()
     
     try:
@@ -289,7 +289,7 @@ def load_daily_plan():
         
         return df
     except Exception as e:
-        st.error(f"Error loading daily plan: {e}")
+        pass
         return pd.DataFrame()
 
 
@@ -331,5 +331,5 @@ def load_realisasi():
         
         return df
     except Exception as e:
-        st.error(f"Error loading realisasi: {e}")
+        pass
         return pd.DataFrame()
