@@ -1,4 +1,5 @@
 # config.py
+
 USERS = {
     "supervisor": {"password": "super123", "role": "supervisor", "name": "Supervisor Tambang"},
     "admin_produksi": {"password": "prod123", "role": "produksi", "name": "Admin Produksi"},
@@ -9,8 +10,17 @@ USERS = {
 }
 
 COLORS = {
-    "primary": "#00C853", "secondary": "#2196F3", "danger": "#FF5252",
-    "warning": "#FFD600", "info": "#00BCD4", "dark": "#1a1a2e", "card": "#16213e",
+    "primary": "#00C853",
+    "secondary": "#2196F3",
+    "danger": "#FF5252",
+    "warning": "#FFD600",
+    "info": "#00BCD4",
+    "dark": "#1a1a2e",
+    "card": "#16213e",
 }
 
-CHART_COLORS = ["#00E676", "#2979FF", "#FF6D00", "#D500F9", "#FFEA00", "#00E5FF", "#FF1744", "#76FF03"]
+CHART_COLORS = [
+    "#00E676", "#2979FF", "#FF6D00",
+    "#D500F9", "#FFEA00", "#00E5FF",
+    "#FF1744", "#76FF03"
+]
