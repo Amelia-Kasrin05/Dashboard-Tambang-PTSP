@@ -257,27 +257,83 @@ def show_produksi():
         st.warning("⚠️ Data tidak tersedia. Upload file Produksi_UTSG_Harian.xlsx")
         return
     
+    # =========================
     # Filter
+    # =========================
     st.markdown('<div class="section-title">🔍 Filter Data</div>', unsafe_allow_html=True)
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-    
-    min_date, max_date = df['Date'].min().date(), df['Date'].max().date()
+
+    col_f1, col_f2, col_f3, col_f4, col_f5, col_f6 = st.columns(6)
+
+    # tanggal min max
+    min_date, max_date = df['Date'].min(), df['Date'].max()
+
     with col_f1:
-        start_date = st.date_input("📅 Dari Tanggal", min_date, min_value=min_date, max_value=max_date)
+        start_date = st.date_input(
+            "📅 Dari Tanggal",
+            min_date,
+            min_value=min_date,
+            max_value=max_date
+        )
+
     with col_f2:
-        end_date = st.date_input("📅 Sampai Tanggal", max_date, min_value=min_date, max_value=max_date)
+        end_date = st.date_input(
+            "📅 Sampai Tanggal",
+            max_date,
+            min_value=min_date,
+            max_value=max_date
+        )
+
     with col_f3:
-        selected_shift = st.selectbox("🔄 Shift", ['Semua'] + sorted(df['Shift'].unique().tolist()))
+        selected_shift = st.selectbox(
+            "🔄 Shift",
+            ['Semua'] + sorted(df['Shift'].dropna().unique().tolist())
+        )
+
     with col_f4:
-        selected_exc = st.selectbox("🏗️ Excavator", ['Semua'] + sorted(df['Excavator'].unique().tolist()))
-    
-    mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
-    if selected_shift != 'Semua': mask &= (df['Shift'] == selected_shift)
-    if selected_exc != 'Semua': mask &= (df['Excavator'] == selected_exc)
+        selected_exc = st.selectbox(
+            "🏗️ Excavator",
+            ['Semua'] + sorted(df['Excavator'].dropna().unique().tolist())
+        )
+
+    with col_f5:
+        selected_blok = st.selectbox(
+            "🧱 BLOK",
+            ['Semua'] + sorted(df['BLOK'].dropna().unique().tolist())
+        )
+
+    with col_f6:
+        selected_front = st.selectbox(
+            "📍 Front",
+            ['Semua'] + sorted(df['Front'].dropna().unique().tolist())
+        )
+
+    # =========================
+    # Filtering logic
+    # =========================
+    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
+
+    if selected_shift != 'Semua':
+        mask &= (df['Shift'] == selected_shift)
+
+    if selected_exc != 'Semua':
+        mask &= (df['Excavator'] == selected_exc)
+
+    if selected_blok != 'Semua':
+        mask &= (df['BLOK'] == selected_blok)
+
+    if selected_front != 'Semua':
+        mask &= (df['Front'] == selected_front)
+
     df_filtered = df[mask].copy()
-    
-    st.markdown(f'<p style="color:#8b949e;font-size:0.8rem;">Menampilkan {len(df_filtered):,} dari {len(df):,} data | {start_date} s/d {end_date}</p>', unsafe_allow_html=True)
-    
+
+    st.markdown(
+        f'<p style="color:#8b949e;font-size:0.8rem;">'
+        f'Menampilkan {len(df_filtered):,} dari {len(df):,} data | '
+        f'{start_date} s/d {end_date}'
+        f'</p>',
+        unsafe_allow_html=True
+    )
+
     # KPI
     cols = st.columns(5)
     kpis = [("🚛","RITASE",f"{df_filtered['Rit'].sum():,.0f}"),("⚖️","TONASE",f"{df_filtered['Tonnase'].sum():,.0f}"),
@@ -287,7 +343,29 @@ def show_produksi():
         col.markdown(f'<div class="metric-card"><div class="metric-icon">{icon}</div><div class="metric-label">{label}</div><div class="metric-value">{val}</div></div>', unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
-    
+    st.markdown('<div class="section-title">🧱 Produksi per BLOK</div>', unsafe_allow_html=True)
+
+    blok_prod = (
+        df_filtered
+        .groupby('BLOK')['Tonnase']
+        .sum()
+        .reset_index()
+        .sort_values('Tonnase', ascending=True)
+    )
+
+    fig = px.bar(
+        blok_prod,
+        x='Tonnase',
+        y='BLOK',
+        orientation='h',
+        color='Tonnase',
+        color_continuous_scale='Greens'
+    )
+
+    fig.update_layout(**chart_layout(height=350))
+    fig.update_coloraxes(showscale=False)
+    st.plotly_chart(fig, use_container_width=True)
+
     # Combo Chart
     st.markdown('<div class="section-title">📈 Tren Produksi Harian - Tonase & Ritase (Combo Chart)</div>', unsafe_allow_html=True)
     daily = df_filtered.groupby('Date').agg({'Tonnase':'sum','Rit':'sum'}).reset_index()
@@ -324,33 +402,125 @@ def show_produksi():
         fig.update_layout(**chart_layout(height=280))
         st.plotly_chart(fig, use_container_width=True)
     
+    # =========================================================
+    # ANALISIS PRODUKTIVITAS
+    # =========================================================
+    st.markdown(
+        """
+        <div style="
+            margin-top:20px;
+            margin-bottom:10px;
+            padding-left:6px;
+            border-left:4px solid #00E676;
+        ">
+            <h3 style="margin:0;color:#e6edf3;">
+                📊 Analisis Produktivitas
+            </h3>
+            <p style="margin:4px 0 0 0;color:#8b949e;font-size:0.85rem;">
+                Hubungan ritase, tonase, dan pola waktu produksi
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # =========================================================
     # Scatter & Heatmap
-    c1,c2 = st.columns(2)
+    # =========================================================
+    c1, c2 = st.columns(2)
+
     with c1:
-        st.markdown('<div class="section-title">🔗 Korelasi Rit vs Tonase (Scatter)</div>', unsafe_allow_html=True)
-        sample = df_filtered.sample(min(500, len(df_filtered))) if len(df_filtered)>0 else df_filtered
-        fig = px.scatter(sample, x='Rit', y='Tonnase', color='Shift', color_discrete_sequence=['#00E676','#58a6ff','#f0883e'], opacity=0.7)
+        st.markdown(
+            '<div class="section-title">🔗 Korelasi Rit vs Tonase</div>',
+            unsafe_allow_html=True
+        )
+
+        sample = (
+            df_filtered.sample(min(500, len(df_filtered)))
+            if not df_filtered.empty
+            else df_filtered
+        )
+
+        fig = px.scatter(
+            sample,
+            x='Rit',
+            y='Tonnase',
+            color='Shift',
+            color_discrete_sequence=['#00E676', '#58a6ff', '#f0883e'],
+            opacity=0.7
+        )
         fig.update_layout(**chart_layout(height=300))
         st.plotly_chart(fig, use_container_width=True)
-    
+
     with c2:
-        st.markdown('<div class="section-title">📅 Heatmap Produksi (Hari x Shift)</div>', unsafe_allow_html=True)
-        df_filtered['DayOfWeek'] = df_filtered['Date'].dt.day_name()
-        pivot = df_filtered.pivot_table(values='Tonnase', index='Shift', columns='DayOfWeek', aggfunc='mean', fill_value=0)
-        day_order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-        pivot = pivot.reindex(columns=[d for d in day_order if d in pivot.columns])
-        fig = px.imshow(pivot, color_continuous_scale='Greens', aspect='auto')
-        fig.update_layout(**chart_layout(height=300))
+        st.markdown(
+            '<div class="section-title">⏱️ Heatmap Produksi (Jam × Shift)</div>',
+            unsafe_allow_html=True
+        )
+
+        # Ambil jam awal dari kolom Time (07:00-08:00 → 7)
+        df_filtered['Jam'] = (
+            df_filtered['Time']
+            .astype(str)
+            .str.split(':')
+            .str[0]
+            .astype(int)
+        )
+
+        all_hours = list(range(24))
+
+        pivot = (
+            df_filtered
+            .pivot_table(
+                values='Tonnase',
+                index='Shift',
+                columns='Jam',
+                aggfunc='sum'
+            )
+            .reindex(columns=all_hours, fill_value=0)
+        )
+
+        fig = px.imshow(
+            pivot,
+            color_continuous_scale='Greens',
+            aspect='auto',
+            labels=dict(x="Jam", y="Shift", color="Tonase")
+        )
+
+        fig.update_layout(
+            height=320,
+            xaxis=dict(tickmode='array', tickvals=all_hours)
+        )
+
         st.plotly_chart(fig, use_container_width=True)
-    
+       
     # Data Table
     st.markdown('<div class="section-title">📋 Data Detail</div>', unsafe_allow_html=True)
     col_dl1, col_dl2 = st.columns([4,1])
     with col_dl2:
         csv = df_filtered[['Date','Shift','Front','Commudity','Excavator','Dump Truck','Rit','Tonnase']].to_csv(index=False)
         st.download_button("📥 Download CSV", csv, "produksi_filtered.csv", "text/csv", use_container_width=True)
-    st.dataframe(df_filtered[['Date','Shift','Front','Commudity','Excavator','Dump Truck','Rit','Tonnase']].sort_values('Date',ascending=False), use_container_width=True, height=300)
+    cols_detail = [
+        'Date',
+        'Time',
+        'Shift',
+        'BLOK',
+        'Front',
+        'Commudity',
+        'Excavator',
+        'Dump Truck',
+        'Dump Loc',
+        'Rit',
+        'Tonnase'
+    ]
 
+    cols_detail = [c for c in cols_detail if c in df_filtered.columns]
+
+    st.dataframe(
+        df_filtered[cols_detail].sort_values('Date', ascending=False),
+        use_container_width=True,
+        height=300
+    )
 # ================================================================
 # GANGGUAN
 # ================================================================

@@ -36,9 +36,16 @@ def load_produksi():
         valid_shifts = ['Shift 1', 'Shift 2', 'Shift 3']
         df = df[df['Shift'].isin(valid_shifts)]
         
-        # Clean date
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df[df['Date'].notna()]
+        # --- DATE: pastikan hanya tanggal ---
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
+
+        # --- TIME: biarkan terpisah (string / jam saja) ---
+        if 'Time' in df.columns:
+            df['Time'] = df['Time'].astype(str)
+        else:
+            df['Time'] = ''
+
+
         
         # Deteksi & perbaiki kolom bergeser (Sept+)
         mask_normal = df['Excavator'].astype(str).str.startswith('PC', na=False)
@@ -50,6 +57,10 @@ def load_produksi():
             df_shifted_fixed['Date'] = df_shifted['Date']
             df_shifted_fixed['Time'] = df_shifted['Time']
             df_shifted_fixed['Shift'] = df_shifted['Shift']
+
+            # 🔥 BLOK DIAMBIL DARI KOLOM FRONT LAMA
+            df_shifted_fixed['BLOK'] = df_shifted['Front']
+
             df_shifted_fixed['Front'] = df_shifted['Commudity']
             df_shifted_fixed['Commudity'] = df_shifted['Excavator']
             df_shifted_fixed['Excavator'] = df_shifted['Dump Truck']
@@ -57,6 +68,7 @@ def load_produksi():
             df_shifted_fixed['Dump Loc'] = df_shifted['Rit']
             df_shifted_fixed['Rit'] = df_shifted['Tonnase']
             df_shifted_fixed['Tonnase'] = df_shifted['Unnamed: 10']
+
             df = pd.concat([df_normal, df_shifted_fixed], ignore_index=True)
         
         # Hapus kolom Unnamed & validasi
@@ -75,7 +87,11 @@ def load_produksi():
         df = df.dropna(subset=['Tonnase'])
         df = df[df['Tonnase'] > 0]
         df = df.reset_index(drop=True)
-        
+                # Pastikan kolom selalu ada (untuk bulan lama)
+        for col in ['BLOK', 'Dump Loc']:
+            if col not in df.columns:
+                df[col] = ''
+
         return df
         
     except Exception as e:
