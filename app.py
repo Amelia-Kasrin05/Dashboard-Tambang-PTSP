@@ -7,538 +7,1217 @@ import numpy as np
 from datetime import datetime
 import os
 import sys
+import base64
 
 sys.path.append('.')
 from utils.data_loader import *
 from config import USERS, COLORS, CHART_COLORS
 from onedrive_config import CACHE_TTL
 
-st.set_page_config(page_title="Dashboard Tambang Semen Padang", page_icon="⛏️", layout="wide")
+# ============================================================
+# LOGO LOADER
+# ============================================================
+def get_logo_base64():
+    """Load logo dan convert ke base64"""
+    logo_paths = [
+        "logo_semen_padang.jpg",
+        "logo.jpg", 
+        "assets/logo.jpg",
+        "static/logo.jpg",
+        "images/logo.jpg"
+    ]
+    for path in logo_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    return base64.b64encode(f.read()).decode()
+            except:
+                continue
+    return None
 
-# Enhanced CSS
+LOGO_BASE64 = get_logo_base64()
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+st.set_page_config(
+    page_title="Mining Dashboard | Semen Padang",
+    page_icon="⛏️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================
+# PROFESSIONAL MINING CSS - Navy & Gold Theme
+# ============================================================
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-.stApp {background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%); font-family: 'Inter', sans-serif;}
-div[data-testid="stSidebar"] {background: linear-gradient(180deg, #0d1117 0%, #161b22 100%); border-right: 1px solid #30363d;}
-.sidebar-header {font-size:1.3rem;font-weight:700;background:linear-gradient(90deg,#00C853,#00E5FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-align:center;padding:0.5rem 0;}
-.metric-card {background:linear-gradient(145deg,#1e2a3a,#16213e);border-radius:16px;padding:1.2rem;border:1px solid #30363d;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:transform 0.2s;}
-.metric-card:hover {transform:translateY(-2px);}
-.metric-value {font-size:1.8rem;font-weight:700;color:#fff;margin:0;}
-.metric-label {font-size:0.8rem;color:#8b949e;margin-bottom:0.3rem;text-transform:uppercase;letter-spacing:0.5px;}
-.metric-icon {font-size:1.3rem;margin-bottom:0.3rem;}
-.section-title {font-size:1rem;color:#58a6ff;font-weight:600;margin:1.5rem 0 1rem 0;padding-left:12px;border-left:3px solid #58a6ff;}
-.chart-container {background:#161b22;border-radius:12px;padding:1rem;border:1px solid #30363d;margin-bottom:1rem;}
-div[data-testid="stMetric"] {background:linear-gradient(145deg,#1e2a3a,#16213e);border-radius:12px;padding:1rem;border:1px solid #30363d;}
-div[data-testid="stMetric"] label {color:#8b949e !important;}
-div[data-testid="stMetric"] [data-testid="stMetricValue"] {color:#fff !important;}
-div[data-testid="stFileUploader"] {background:#21262d;border-radius:8px;padding:0.5rem;}
-div[data-testid="stDateInput"] input {background:#21262d;border:1px solid #30363d;color:#fff;}
-.overview-card {background:linear-gradient(145deg,#1e2a3a,#16213e);border-radius:16px;padding:1.5rem;border:1px solid #30363d;margin-bottom:1rem;}
-.overview-title {color:#58a6ff;font-size:1.1rem;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;}
-.status-box {background:#21262d;border-radius:8px;padding:0.5rem 0.8rem;margin:0.3rem 0;font-size:0.8rem;color:#c9d1d9;}
+/* ===== IMPORTS ===== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ===== ROOT VARIABLES ===== */
+:root {
+    --bg-primary: #0a1628;
+    --bg-secondary: #0f2744;
+    --bg-card: #122a46;
+    --bg-card-hover: #1a3a5c;
+    --accent-gold: #d4a84b;
+    --accent-gold-light: #e8c97a;
+    --accent-blue: #3b82f6;
+    --accent-green: #10b981;
+    --accent-red: #ef4444;
+    --accent-orange: #f59e0b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --border-color: #1e3a5f;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ===== GLOBAL STYLES ===== */
+.stApp {
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    font-family: 'Inter', -apple-system, sans-serif;
+}
+
+/* Hide default streamlit elements */
+#MainMenu, footer, header {visibility: hidden;}
+.block-container {padding: 1rem 2rem 2rem 2rem !important; max-width: 100% !important;}
+
+/* ===== SIDEBAR ===== */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #071020 0%, #0a1628 100%);
+    border-right: 1px solid var(--border-color);
+}
+section[data-testid="stSidebar"] .block-container {padding: 1rem !important;}
+
+/* Sidebar buttons */
+section[data-testid="stSidebar"] button {
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    color: var(--text-secondary) !important;
+    text-align: left !important;
+    transition: all 0.2s ease !important;
+    border-radius: 8px !important;
+    margin: 2px 0 !important;
+}
+section[data-testid="stSidebar"] button:hover {
+    background: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+section[data-testid="stSidebar"] button[kind="primary"] {
+    background: linear-gradient(135deg, var(--accent-gold) 0%, #b8942f 100%) !important;
+    color: #0a1628 !important;
+    font-weight: 600 !important;
+    border: none !important;
+}
+
+/* ===== TYPOGRAPHY ===== */
+h1, h2, h3, h4 {color: var(--text-primary) !important; font-weight: 600 !important;}
+
+.page-header {
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.page-header-icon {
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, var(--accent-gold) 0%, #b8942f 100%);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.75rem;
+}
+.page-header-text h1 {
+    margin: 0 !important;
+    font-size: 1.75rem !important;
+    background: linear-gradient(90deg, var(--text-primary) 0%, var(--accent-gold-light) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.page-header-text p {
+    margin: 0.25rem 0 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* ===== KPI CARDS ===== */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.kpi-card {
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.25rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+.kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--card-accent, var(--accent-gold));
+}
+.kpi-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow);
+    border-color: var(--card-accent, var(--accent-gold));
+}
+.kpi-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.9;
+}
+.kpi-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+.kpi-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+.kpi-subtitle {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+.kpi-trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.5rem;
+}
+.kpi-trend.up {background: rgba(16,185,129,0.15); color: var(--accent-green);}
+.kpi-trend.down {background: rgba(239,68,68,0.15); color: var(--accent-red);}
+
+/* ===== CHART CONTAINER ===== */
+.chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+}
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+.chart-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.chart-badge {
+    background: var(--accent-gold);
+    color: var(--bg-primary);
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+/* ===== SECTION DIVIDER ===== */
+.section-divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 2rem 0 1.5rem 0;
+}
+.section-divider-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-color) 0%, transparent 100%);
+}
+.section-divider-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent-gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* ===== LOGIN PAGE ===== */
+.login-container {
+    max-width: 420px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+.login-card {
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 24px;
+    padding: 2.5rem;
+    box-shadow: var(--shadow);
+}
+.login-logo {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+.login-logo-icon {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, var(--accent-gold) 0%, #b8942f 100%);
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 32px rgba(212,168,75,0.3);
+}
+.login-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--text-primary) 0%, var(--accent-gold-light) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0;
+}
+.login-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+
+/* ===== USER CARD (Sidebar) ===== */
+.user-card {
+    background: linear-gradient(145deg, var(--bg-card) 0%, rgba(212,168,75,0.1) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.25rem;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+.user-avatar {
+    width: 64px;
+    height: 64px;
+    background: linear-gradient(135deg, var(--accent-gold) 0%, #b8942f 100%);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.75rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 4px 16px rgba(212,168,75,0.3);
+}
+.user-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+.user-role {
+    font-size: 0.75rem;
+    color: var(--accent-gold);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 0.25rem;
+}
+
+/* ===== STATUS INDICATOR ===== */
+.status-grid {
+    display: grid;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.status-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+}
+.status-name {color: var(--text-secondary);}
+.status-value {font-weight: 500;}
+.status-ok {color: var(--accent-green);}
+.status-warn {color: var(--accent-orange);}
+.status-err {color: var(--accent-red);}
+
+/* ===== NAV LABEL ===== */
+.nav-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin: 1rem 0 0.5rem 0.5rem;
+}
+
+/* ===== STREAMLIT OVERRIDES ===== */
+div[data-testid="stMetric"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem;
+}
+div[data-testid="stMetric"] label {color: var(--text-muted) !important; font-size: 0.8rem !important;}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {color: var(--text-primary) !important; font-size: 1.5rem !important;}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.5rem;
+    background: var(--bg-secondary);
+    padding: 0.5rem;
+    border-radius: 12px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--bg-card) !important;
+    color: var(--accent-gold) !important;
+}
+
+/* Selectbox & Inputs */
+div[data-baseweb="select"] > div {
+    background: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    border-radius: 8px !important;
+}
+div[data-baseweb="input"] > div {
+    background: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+}
+input {color: var(--text-primary) !important;}
+
+/* Dataframe */
+.stDataFrame {border-radius: 12px; overflow: hidden;}
+
+/* Expander */
+.streamlit-expanderHeader {
+    background: var(--bg-card) !important;
+    border-radius: 8px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# Session State
+
+# ============================================================
+# SESSION STATE
+# ============================================================
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.username = st.session_state.role = st.session_state.name = None
+    st.session_state.username = None
+    st.session_state.role = None
+    st.session_state.name = None
 if 'current_menu' not in st.session_state:
-    st.session_state.current_menu = "Dashboard Overview"
+    st.session_state.current_menu = "Dashboard"
 
-def login(u, p):
-    if u in USERS and USERS[u]['password'] == p:
-        st.session_state.logged_in, st.session_state.username = True, u
-        st.session_state.role, st.session_state.name = USERS[u]['role'], USERS[u]['name']
+
+# ============================================================
+# AUTH FUNCTIONS
+# ============================================================
+def login(username, password):
+    if username in USERS and USERS[username]['password'] == password:
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        st.session_state.role = USERS[username]['role']
+        st.session_state.name = USERS[username]['name']
         return True
     return False
 
 def logout():
-    st.session_state.logged_in = False
-    st.session_state.username = st.session_state.role = st.session_state.name = None
+    for key in ['logged_in', 'username', 'role', 'name']:
+        st.session_state[key] = None if key != 'logged_in' else False
 
-def chart_layout(title=None, height=300):
-    layout = dict(
+
+# ============================================================
+# CHART THEME
+# ============================================================
+def get_chart_layout(height=350, show_legend=True):
+    """Professional chart layout for mining dashboard"""
+    return dict(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         height=height,
-        margin=dict(l=60, r=30, t=50 if title else 30, b=60),
-        xaxis=dict(showgrid=False, zeroline=False, automargin=True),
-        yaxis=dict(showgrid=True, gridcolor='#21262d', zeroline=False, automargin=True),
-        legend=dict(orientation='h', y=-0.25, x=0.5, xanchor='center')
+        margin=dict(l=20, r=20, t=40, b=40),
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor='#1e3a5f',
+            tickfont=dict(size=11)
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(30,58,95,0.5)',
+            zeroline=False,
+            showline=False,
+            tickfont=dict(size=11)
+        ),
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=-0.2,
+            xanchor='center',
+            x=0.5,
+            bgcolor='rgba(0,0,0,0)'
+        ) if show_legend else dict(visible=False),
+        hoverlabel=dict(
+            bgcolor='#122a46',
+            font_size=12,
+            font_family='Inter'
+        )
     )
-    if title:
-        layout["title"] = dict(text=title, x=0.5, font=dict(size=14))
-    return layout
+
+# Mining color palette
+MINING_COLORS = {
+    'gold': '#d4a84b',
+    'blue': '#3b82f6',
+    'green': '#10b981',
+    'red': '#ef4444',
+    'orange': '#f59e0b',
+    'purple': '#8b5cf6',
+    'cyan': '#06b6d4',
+    'slate': '#64748b'
+}
+
+CHART_SEQUENCE = ['#d4a84b', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ef4444', '#ec4899']
 
 
+# ============================================================
 # LOGIN PAGE
+# ============================================================
 def show_login():
-    col1, col2, col3 = st.columns([1,1.5,1])
-    with col2:
-        st.markdown("""
-        <div style="text-align:center;padding:2rem 0;">
-            <p style="font-size:3.5rem;margin:0;">⛏️</p>
-            <h1 style="background:linear-gradient(90deg,#00C853,#00E5FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0.5rem 0;font-size:2.2rem;">Dashboard Tambang</h1>
-            <p style="color:#8b949e;font-size:1rem;">Semen Padang Mining Operations</p>
-        </div>
-        """, unsafe_allow_html=True)
-        with st.form("login"):
-            u = st.text_input("👤 Username")
-            p = st.text_input("🔒 Password", type="password")
-            if st.form_submit_button("🚀 Login", use_container_width=True):
-                if login(u, p): st.rerun()
-                else: st.error("❌ Login gagal!")
-        st.caption("Demo: admin_produksi/prod123")
-
-
-# ================================================================
-# DASHBOARD OVERVIEW
-# ================================================================
-def show_overview():
-    st.markdown('<h2 style="color:#fff;margin-bottom:1.5rem;">📊 Dashboard Overview</h2>', unsafe_allow_html=True)
+    logo_base64 = LOGO_BASE64
     
-    df_prod = load_produksi()
-    df_bbm = load_bbm()
-    df_gangguan = load_gangguan("Januari")
-    df_daily = load_daily_plan()
-    
-    # Row 1: Main KPIs
-    cols = st.columns(5)
-    metrics = [
-        ("🚛", "Total Ritase", f"{df_prod['Rit'].sum():,.0f}" if not df_prod.empty else "0", "#00E676"),
-        ("⚖️", "Total Tonase", f"{df_prod['Tonnase'].sum():,.0f}" if not df_prod.empty else "0", "#58a6ff"),
-        ("🏗️", "Unit Excavator", f"{df_prod['Excavator'].nunique()}" if not df_prod.empty else "0", "#f0883e"),
-        ("⛽", "Total BBM (L)", f"{df_bbm['Total'].sum():,.0f}" if not df_bbm.empty else "0", "#a371f7"),
-        ("🚨", "Jenis Gangguan", f"{len(df_gangguan)}" if not df_gangguan.empty else "0", "#f85149")
-    ]
-    for col, (icon, label, value, color) in zip(cols, metrics):
-        col.markdown(f'<div class="metric-card"><div class="metric-icon">{icon}</div><div class="metric-label">{label}</div><div class="metric-value" style="color:{color}">{value}</div></div>', unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Row 2: Charts
-    col1, col2 = st.columns([3, 2])
-    with col1:
-        st.markdown('<div class="section-title">📈 Tren Produksi Harian</div>', unsafe_allow_html=True)
-        if not df_prod.empty:
-            daily = df_prod.groupby('Date').agg({'Tonnase':'sum','Rit':'sum'}).reset_index()
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=daily['Date'], y=daily['Tonnase'], name='Tonase', fill='tozeroy',
-                                     line=dict(color='#00E676',width=2), fillcolor='rgba(0,230,118,0.15)'))
-            fig.update_layout(**chart_layout(height=280))
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Data produksi tidak tersedia")
+    col1, col2, col3 = st.columns([1, 1.2, 1])
     
     with col2:
-        st.markdown('<div class="section-title">🏗️ Produksi per Excavator</div>', unsafe_allow_html=True)
-        if not df_prod.empty:
-            exc = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index().sort_values('Tonnase').tail(6)
-            fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h', 
-                         color='Tonnase', color_continuous_scale=['#1e3a5f','#58a6ff'])
-            fig.update_layout(**chart_layout(height=280))
-            fig.update_coloraxes(showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+        # Logo section
+        if logo_base64:
+            logo_html = f'<img src="data:image/jpeg;base64,{logo_base64}" alt="Logo" style="width:100px; height:auto; margin-bottom:1rem; border-radius:16px; box-shadow: 0 8px 32px rgba(212,168,75,0.3);">'
         else:
-            st.info("Data tidak tersedia")
-    
-    # Row 3: Distribution
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown('<div class="section-title">🪨 Material</div>', unsafe_allow_html=True)
-        if not df_prod.empty:
-            mat = df_prod.groupby('Commudity')['Tonnase'].sum().reset_index()
-            fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5,
-                         color_discrete_sequence=['#00E676','#58a6ff','#f0883e','#a371f7'])
-            fig.update_layout(**chart_layout(height=200))
-            fig.update_traces(textposition='inside', textinfo='percent')
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with c2:
-        st.markdown('<div class="section-title">🔄 Per Shift</div>', unsafe_allow_html=True)
-        if not df_prod.empty:
-            shift = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
-            fig = px.bar(shift, x='Shift', y='Tonnase', color='Shift',
-                         color_discrete_sequence=['#00E676','#58a6ff','#f0883e'])
-            fig.update_layout(**chart_layout(height=200), showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with c3:
-        st.markdown('<div class="section-title">🚨 Top Gangguan</div>', unsafe_allow_html=True)
-        if not df_gangguan.empty:
-            dg_top = df_gangguan.head(5)
-            fig = px.bar(dg_top, x='Frekuensi', y='Row Labels', orientation='h',
-                        color_discrete_sequence=['#f85149'])
-            fig.update_layout(**chart_layout(height=200))
-            fig.update_yaxes(categoryorder='total ascending')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Data tidak tersedia")
-    
-    with c4:
-        st.markdown('<div class="section-title">⛽ BBM per Alat</div>', unsafe_allow_html=True)
-        if not df_bbm.empty:
-            bbm_type = df_bbm.groupby('Alat Berat')['Total'].sum().reset_index().head(5)
-            fig = px.pie(bbm_type, values='Total', names='Alat Berat', hole=0.5,
-                         color_discrete_sequence=['#f0883e','#f85149','#a371f7','#00E676'])
-            fig.update_layout(**chart_layout(height=200))
-            fig.update_traces(textposition='inside', textinfo='percent')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Data tidak tersedia")
-    
-    # Row 4: Heatmap
-    if not df_prod.empty:
-        st.markdown('<div class="section-title">🔥 Heatmap Produktivitas (Shift x Excavator)</div>', unsafe_allow_html=True)
-        pivot = df_prod.pivot_table(values='Tonnase', index='Excavator', columns='Shift', aggfunc='sum', fill_value=0)
-        fig = px.imshow(pivot, color_continuous_scale='Greens', aspect='auto',
-                        labels=dict(x="Shift", y="Excavator", color="Tonase"))
-        fig.update_layout(**chart_layout(height=280))
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# ================================================================
-# PRODUKSI HARIAN
-# ================================================================
-def show_produksi():
-    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📊 Produksi Harian</h2>', unsafe_allow_html=True)
-    
-    df = load_produksi()
-    if df.empty: 
-        st.warning("⚠️ Data tidak tersedia. Pastikan link OneDrive sudah dikonfigurasi atau file lokal tersedia.")
-        return
-    
-    # Filter
-    st.markdown('<div class="section-title">🔍 Filter Data</div>', unsafe_allow_html=True)
-    col_f1, col_f2, col_f3, col_f4, col_f5, col_f6 = st.columns(6)
-    
-    min_date, max_date = df['Date'].min(), df['Date'].max()
-    
-    with col_f1:
-        start_date = st.date_input("📅 Dari Tanggal", min_date, min_value=min_date, max_value=max_date)
-    with col_f2:
-        end_date = st.date_input("📅 Sampai Tanggal", max_date, min_value=min_date, max_value=max_date)
-    with col_f3:
-        selected_shift = st.selectbox("🔄 Shift", ['Semua'] + sorted(df['Shift'].dropna().unique().tolist()))
-    with col_f4:
-        selected_exc = st.selectbox("🏗️ Excavator", ['Semua'] + sorted(df['Excavator'].dropna().unique().tolist()))
-    with col_f5:
-        selected_blok = st.selectbox("🧱 BLOK", ['Semua'] + sorted(df['BLOK'].dropna().unique().tolist()))
-    with col_f6:
-        selected_front = st.selectbox("📍 Front", ['Semua'] + sorted(df['Front'].dropna().unique().tolist()))
-
-    # Filtering logic
-    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
-    if selected_shift != 'Semua': mask &= (df['Shift'] == selected_shift)
-    if selected_exc != 'Semua': mask &= (df['Excavator'] == selected_exc)
-    if selected_blok != 'Semua': mask &= (df['BLOK'] == selected_blok)
-    if selected_front != 'Semua': mask &= (df['Front'] == selected_front)
-    df_filtered = df[mask].copy()
-
-    st.markdown(f'<p style="color:#8b949e;font-size:0.8rem;">Menampilkan {len(df_filtered):,} dari {len(df):,} data | {start_date} s/d {end_date}</p>', unsafe_allow_html=True)
-
-    # KPI
-    cols = st.columns(5)
-    kpis = [
-        ("🚛","RITASE",f"{df_filtered['Rit'].sum():,.0f}"),
-        ("⚖️","TONASE",f"{df_filtered['Tonnase'].sum():,.0f}"),
-        ("📊","AVG/TRIP",f"{df_filtered['Tonnase'].mean():.0f}" if len(df_filtered)>0 else "0"),
-        ("🏗️","EXCAVATOR",f"{df_filtered['Excavator'].nunique()}"),
-        ("📅","HARI",f"{df_filtered['Date'].nunique()}")
-    ]
-    for col,(icon,label,val) in zip(cols,kpis):
-        col.markdown(f'<div class="metric-card"><div class="metric-icon">{icon}</div><div class="metric-label">{label}</div><div class="metric-value">{val}</div></div>', unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Produksi per BLOK
-    st.markdown('<div class="section-title">🧱 Produksi per BLOK</div>', unsafe_allow_html=True)
-    blok_prod = df_filtered.groupby('BLOK')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
-    fig = px.bar(blok_prod, x='Tonnase', y='BLOK', orientation='h', color='Tonnase', color_continuous_scale='Greens')
-    fig.update_layout(**chart_layout(height=350))
-    fig.update_coloraxes(showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Combo Chart
-    st.markdown('<div class="section-title">📈 Tren Produksi Harian - Tonase & Ritase</div>', unsafe_allow_html=True)
-    daily = df_filtered.groupby('Date').agg({'Tonnase':'sum','Rit':'sum'}).reset_index()
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(x=daily['Date'], y=daily['Rit'], name='Ritase', marker_color='rgba(88,166,255,0.6)'), secondary_y=False)
-    fig.add_trace(go.Scatter(x=daily['Date'], y=daily['Tonnase'], name='Tonase', line=dict(color='#00E676',width=3), mode='lines+markers'), secondary_y=True)
-    fig.update_layout(**chart_layout(height=350))
-    fig.update_yaxes(title_text="Ritase", secondary_y=False, showgrid=False)
-    fig.update_yaxes(title_text="Tonase", secondary_y=True, showgrid=True, gridcolor='#21262d')
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Distribution Charts
-    c1,c2,c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="section-title">🔄 Distribusi Shift</div>', unsafe_allow_html=True)
-        shift_data = df_filtered.groupby('Shift')['Tonnase'].sum().reset_index()
-        fig = px.pie(shift_data, values='Tonnase', names='Shift', hole=0.5, color_discrete_sequence=['#00E676','#58a6ff','#f0883e'])
-        fig.update_layout(**chart_layout(height=280))
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with c2:
-        st.markdown('<div class="section-title">🏗️ Per Excavator</div>', unsafe_allow_html=True)
-        exc = df_filtered.groupby('Excavator')['Tonnase'].sum().reset_index().sort_values('Tonnase')
-        fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h', color='Tonnase', color_continuous_scale='Greens')
-        fig.update_layout(**chart_layout(height=280))
-        fig.update_coloraxes(showscale=False)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with c3:
-        st.markdown('<div class="section-title">🪨 Material</div>', unsafe_allow_html=True)
-        mat = df_filtered.groupby('Commudity')['Tonnase'].sum().reset_index()
-        fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5, color_discrete_sequence=['#00E676','#58a6ff','#f0883e','#a371f7'])
-        fig.update_layout(**chart_layout(height=280))
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Analisis Produktivitas
-    st.markdown("""
-    <div style="margin-top:20px;margin-bottom:10px;padding-left:6px;border-left:4px solid #00E676;">
-        <h3 style="margin:0;color:#e6edf3;">📊 Analisis Produktivitas</h3>
-        <p style="margin:4px 0 0 0;color:#8b949e;font-size:0.85rem;">Hubungan ritase, tonase, dan pola waktu produksi</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown('<div class="section-title">🔗 Korelasi Rit vs Tonase</div>', unsafe_allow_html=True)
-        sample = df_filtered.sample(min(500, len(df_filtered))) if not df_filtered.empty else df_filtered
-        fig = px.scatter(sample, x='Rit', y='Tonnase', color='Shift',
-                        color_discrete_sequence=['#00E676', '#58a6ff', '#f0883e'], opacity=0.7)
-        fig.update_layout(**chart_layout(height=300))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with c2:
-        st.markdown('<div class="section-title">⏱️ Heatmap Produksi (Jam × Shift)</div>', unsafe_allow_html=True)
-        if 'Time' in df_filtered.columns:
-            try:
-                df_filtered['Jam'] = df_filtered['Time'].astype(str).str.split(':').str[0].astype(int)
-                all_hours = list(range(24))
-                pivot = df_filtered.pivot_table(values='Tonnase', index='Shift', columns='Jam', aggfunc='sum').reindex(columns=all_hours, fill_value=0)
-                fig = px.imshow(pivot, color_continuous_scale='Greens', aspect='auto',
-                               labels=dict(x="Jam", y="Shift", color="Tonase"))
-                fig.update_layout(height=320, xaxis=dict(tickmode='array', tickvals=all_hours))
-                st.plotly_chart(fig, use_container_width=True)
-            except:
-                st.info("Data jam tidak tersedia")
-    
-    # Data Table
-    st.markdown('<div class="section-title">📋 Data Detail</div>', unsafe_allow_html=True)
-    col_dl1, col_dl2 = st.columns([4,1])
-    with col_dl2:
-        csv = df_filtered[['Date','Shift','Front','Commudity','Excavator','Dump Truck','Rit','Tonnase']].to_csv(index=False)
-        st.download_button("📥 Download CSV", csv, "produksi_filtered.csv", "text/csv", use_container_width=True)
-    
-    cols_detail = ['Date','Time','Shift','BLOK','Front','Commudity','Excavator','Dump Truck','Dump Loc','Rit','Tonnase']
-    cols_detail = [c for c in cols_detail if c in df_filtered.columns]
-    st.dataframe(df_filtered[cols_detail].sort_values('Date', ascending=False), use_container_width=True, height=300)
-
-
-# ================================================================
-# GANGGUAN
-# ================================================================
-def show_gangguan():
-    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">🚨 Analisis Gangguan Produksi</h2>', unsafe_allow_html=True)
-    
-    bulan = st.selectbox("Pilih Bulan", ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"])
-    dg = load_gangguan(bulan)
-    
-    if not dg.empty:
-        dg['Row Labels'] = dg['Row Labels'].astype(str)
-        c1,c2,c3 = st.columns(3)
-        c1.metric("🔢 Jenis Gangguan", len(dg))
-        c2.metric("📊 Total Frekuensi", f"{dg['Frekuensi'].sum():,.0f}")
-        c3.metric("🔝 Top Issue", dg.iloc[0]['Row Labels'][:25])
-        
-        col1, col2 = st.columns([2,1])
-        with col1:
-            st.markdown('<div class="section-title">📊 Pareto Chart - 80/20 Analysis</div>', unsafe_allow_html=True)
-            dp = dg.head(10).copy()
-            dp['Kumulatif'] = (dp['Frekuensi'].cumsum()/dg['Frekuensi'].sum()*100)
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            fig.add_trace(go.Bar(x=dp['Row Labels'], y=dp['Frekuensi'], name='Frekuensi', marker_color='#f85149'), secondary_y=False)
-            fig.add_trace(go.Scatter(x=dp['Row Labels'], y=dp['Kumulatif'], name='Kumulatif %', line=dict(color='#f0883e',width=3), mode='lines+markers'), secondary_y=True)
-            fig.add_hline(y=80, line_dash="dash", line_color="#58a6ff", secondary_y=True, annotation_text="80%")
-            fig.update_layout(**chart_layout(height=400))
-            fig.update_xaxes(tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.markdown('<div class="section-title">🥧 Proporsi Gangguan</div>', unsafe_allow_html=True)
-            fig = px.pie(dg.head(8), values='Frekuensi', names='Row Labels', hole=0.4, color_discrete_sequence=px.colors.sequential.Reds_r)
-            fig.update_layout(**chart_layout(height=400))
-            st.plotly_chart(fig, use_container_width=True)
-        
-        st.dataframe(dg, use_container_width=True, height=250)
-    else:
-        st.info(f"Data gangguan bulan {bulan} tidak tersedia.")
-
-
-# ================================================================
-# MONITORING
-# ================================================================
-def show_monitoring():
-    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">⛽ Monitoring BBM & Ritase</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["⛽ BBM", "🚛 Ritase"])
-    
-    with tab1:
-        db = load_bbm()
-        if not db.empty:
-            c1,c2,c3 = st.columns(3)
-            c1.metric("⛽ Total BBM", f"{db['Total'].sum():,.0f} L")
-            c2.metric("🏗️ Jumlah Alat", len(db))
-            c3.metric("📊 Avg/Alat", f"{db['Total'].mean():,.0f} L")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown('<div class="section-title">📊 Distribusi BBM per Jenis Alat</div>', unsafe_allow_html=True)
-                bbm_type = db.groupby('Alat Berat')['Total'].sum().reset_index()
-                fig = px.pie(bbm_type, values='Total', names='Alat Berat', hole=0.5, color_discrete_sequence=['#f0883e','#f85149','#a371f7','#00E676'])
-                fig.update_layout(**chart_layout(height=350))
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                st.markdown('<div class="section-title">🔝 Top 10 Konsumsi BBM</div>', unsafe_allow_html=True)
-                fig = px.bar(db.nlargest(10,'Total'), x='Total', y='Tipe Alat', orientation='h', color='Total', color_continuous_scale='OrRd')
-                fig.update_layout(**chart_layout(height=350))
-                fig.update_yaxes(categoryorder='total ascending')
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True)
-            
-            st.dataframe(db, use_container_width=True, height=300)
-        else:
-            st.info("Data BBM tidak tersedia.")
-    
-    with tab2:
-        st.markdown('<div class="section-title">🚛 Ritase per Front</div>', unsafe_allow_html=True)
-        dr = load_ritase()
-        if not dr.empty:
-            rc = [c for c in dr.columns if c not in ['Tanggal','Shift','Pengawasan']]
-            tot = dr[rc].sum().reset_index()
-            tot.columns = ['Front','Total']
-            tot = tot[tot['Total']>0].sort_values('Total', ascending=True)
-            fig = px.bar(tot, x='Total', y='Front', orientation='h', color='Total', color_continuous_scale='Blues')
-            fig.update_layout(**chart_layout(height=400))
-            fig.update_coloraxes(showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(dr, use_container_width=True, height=300)
-        else:
-            st.info("Data ritase tidak tersedia")
-
-
-# ================================================================
-# DAILY PLAN
-# ================================================================
-def show_daily_plan():
-    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📋 Daily Plan & Realisasi</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["📅 Scheduling", "✅ Realisasi"])
-    
-    with tab1:
-        dp = load_daily_plan()
-        if not dp.empty:
-            c1,c2,c3,c4 = st.columns(4)
-            c1.metric("📅 Total Record", len(dp))
-            if 'Batu Kapur' in dp.columns:
-                c2.metric("🪨 Target Batu Kapur", f"{pd.to_numeric(dp['Batu Kapur'], errors='coerce').sum():,.0f}")
-            if 'Silika' in dp.columns:
-                c3.metric("🏔️ Target Silika", f"{pd.to_numeric(dp['Silika'], errors='coerce').sum():,.0f}")
-            if 'Clay' in dp.columns:
-                c4.metric("🧱 Target Clay", f"{pd.to_numeric(dp['Clay'], errors='coerce').sum():,.0f}")
-            
-            st.markdown('<div class="section-title">📋 Data Scheduling</div>', unsafe_allow_html=True)
-            st.dataframe(dp, use_container_width=True, height=400)
-        else:
-            st.info("Data scheduling tidak tersedia.")
-    
-    with tab2:
-        dr = load_realisasi()
-        if not dr.empty:
-            c1,c2,c3,c4 = st.columns(4)
-            c1.metric("📅 Total Record", len(dr))
-            if 'Batu Kapur' in dr.columns:
-                c2.metric("🪨 Realisasi Batu Kapur", f"{pd.to_numeric(dr['Batu Kapur'], errors='coerce').sum():,.0f}")
-            if 'Silika' in dr.columns:
-                c3.metric("🏔️ Realisasi Silika", f"{pd.to_numeric(dr['Silika'], errors='coerce').sum():,.0f}")
-            if 'Timbunan' in dr.columns:
-                c4.metric("🏗️ Realisasi Timbunan", f"{pd.to_numeric(dr['Timbunan'], errors='coerce').sum():,.0f}")
-            
-            st.markdown('<div class="section-title">📋 Data Realisasi</div>', unsafe_allow_html=True)
-            st.dataframe(dr, use_container_width=True, height=400)
-        else:
-            st.info("Data realisasi tidak tersedia")
-
-
-# ================================================================
-# SIDEBAR
-# ================================================================
-def render_sidebar():
-    with st.sidebar:
-        st.markdown('<p class="sidebar-header">⚙️ Dashboard Produksi</p>', unsafe_allow_html=True)
+            logo_html = '<div class="login-logo-icon">⛏️</div>'
         
         st.markdown(f"""
-        <div style="text-align:center;padding:1rem;background:#21262d;border-radius:12px;margin:1rem 0;">
-            <p style="font-size:2.5rem;margin:0;">👤</p>
-            <p style="color:#fff;font-weight:600;margin:0.5rem 0 0 0;">{st.session_state.name}</p>
-            <p style="color:#8b949e;font-size:0.8rem;margin:0;text-transform:uppercase;">{st.session_state.role}</p>
+        <div class="login-container">
+            <div class="login-card">
+                <div class="login-logo">
+                    {logo_html}
+                    <h1 class="login-title">Mining Dashboard</h1>
+                    <p class="login-subtitle">Semen Padang Operations Center</p>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("login_form", clear_on_submit=False):
+            st.markdown("##### 👤 Username")
+            username = st.text_input("Username", label_visibility="collapsed", placeholder="Enter username")
+            
+            st.markdown("##### 🔒 Password")
+            password = st.text_input("Password", type="password", label_visibility="collapsed", placeholder="Enter password")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.form_submit_button("🚀 Sign In", use_container_width=True, type="primary"):
+                if login(username, password):
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials")
+        
+        st.markdown("""
+        <div style="text-align:center; margin-top:1.5rem; padding:1rem; background:rgba(212,168,75,0.1); border-radius:12px;">
+            <p style="color:#94a3b8; font-size:0.85rem; margin:0;">
+                <strong style="color:#d4a84b;">Demo Access:</strong><br>
+                admin_produksi / prod123
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+def render_sidebar():
+    logo_base64 = LOGO_BASE64
+    
+    with st.sidebar:
+        # Logo & Brand
+        if logo_base64:
+            logo_html = f'<img src="data:image/jpeg;base64,{logo_base64}" alt="Logo" style="width:60px; height:auto; border-radius:10px; margin-bottom:0.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.3);">'
+        else:
+            logo_html = '<span style="font-size:2rem;">⛏️</span>'
+        
+        st.markdown(f"""
+        <div style="text-align:center; padding:1rem 0 0.5rem 0;">
+            {logo_html}
+            <p style="color:#d4a84b; font-weight:700; font-size:1.1rem; margin:0.5rem 0 0 0;">
+                MINING OPS
+            </p>
+            <p style="color:#64748b; font-size:0.7rem; margin:0;">Semen Padang</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("---")
         
-        # STATUS KONEKSI ONEDRIVE
-        st.markdown('<p style="color:#58a6ff;font-size:0.85rem;font-weight:600;">📡 STATUS ONEDRIVE</p>', unsafe_allow_html=True)
+        # User Card
+        st.markdown(f"""
+        <div class="user-card">
+            <div class="user-avatar">👤</div>
+            <p class="user-name">{st.session_state.name}</p>
+            <p class="user-role">{st.session_state.role}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Connection Status
+        st.markdown('<p class="nav-label">📡 Data Status</p>', unsafe_allow_html=True)
         
         status = check_onedrive_status()
+        status_html = '<div class="status-grid">'
         for name, stat in status.items():
-            st.markdown(f'<div class="status-box">{name}: {stat}</div>', unsafe_allow_html=True)
+            if "✅" in stat:
+                status_class = "status-ok"
+            elif "⚠️" in stat:
+                status_class = "status-warn"
+            else:
+                status_class = "status-err"
+            status_html += f'<div class="status-item"><span class="status-name">{name}</span><span class="status-value {status_class}">{stat}</span></div>'
+        status_html += '</div>'
+        st.markdown(status_html, unsafe_allow_html=True)
         
-        # Tombol Refresh
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔄 Refresh", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
         with col2:
-            st.caption(f"⏱️ {CACHE_TTL//60}m")
+            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Cache: {CACHE_TTL}s</p>', unsafe_allow_html=True)
         
         st.markdown("---")
-        st.markdown('<p style="color:#58a6ff;font-size:0.85rem;font-weight:600;">📋 MENU NAVIGASI</p>', unsafe_allow_html=True)
         
-        menus = [("🏠","Dashboard Overview"),("📊","Produksi Harian"),("🚨","Gangguan"),("⛽","Monitoring"),("📋","Daily Plan")]
+        # Navigation
+        st.markdown('<p class="nav-label">📋 Navigation</p>', unsafe_allow_html=True)
+        
+        menus = [
+            ("🏠", "Dashboard"),
+            ("📊", "Produksi"),
+            ("🚨", "Gangguan"),
+            ("⛽", "Monitoring"),
+            ("📋", "Daily Plan")
+        ]
+        
         for icon, menu in menus:
             btn_type = "primary" if st.session_state.current_menu == menu else "secondary"
-            if st.button(f"{icon} {menu}", key=f"menu_{menu}", use_container_width=True, type=btn_type):
+            if st.button(f"{icon}  {menu}", key=f"nav_{menu}", use_container_width=True, type=btn_type):
                 st.session_state.current_menu = menu
                 st.rerun()
         
         st.markdown("---")
-        if st.button("🚪 Logout", use_container_width=True): logout(); st.rerun()
         
-        st.markdown('<div style="text-align:center;color:#8b949e;font-size:0.75rem;margin-top:1rem;">⛏️ Semen Padang v3.1<br>OneDrive Edition</div>', unsafe_allow_html=True)
+        # Logout
+        if st.button("🚪 Sign Out", use_container_width=True):
+            logout()
+            st.rerun()
+        
+        # Footer
+        st.markdown("""
+        <div style="text-align:center; margin-top:2rem; padding-top:1rem; border-top:1px solid #1e3a5f;">
+            <p style="color:#64748b; font-size:0.7rem; margin:0;">
+                Mining Dashboard v4.0<br>
+                © 2025 Semen Padang
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-# ================================================================
+# ============================================================
+# DASHBOARD OVERVIEW
+# ============================================================
+def show_dashboard():
+    # Page Header
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">📊</div>
+        <div class="page-header-text">
+            <h1>Operations Dashboard</h1>
+            <p>Real-time mining production overview • Last updated: """ + datetime.now().strftime("%d %b %Y, %H:%M") + """</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Load Data
+    df_prod = load_produksi()
+    df_bbm = load_bbm()
+    df_gangguan = load_gangguan("Januari")
+    df_daily = load_daily_plan()
+    
+    # ===== KPI CARDS =====
+    total_rit = df_prod['Rit'].sum() if not df_prod.empty else 0
+    total_ton = df_prod['Tonnase'].sum() if not df_prod.empty else 0
+    total_exc = df_prod['Excavator'].nunique() if not df_prod.empty else 0
+    total_bbm = df_bbm['Total'].sum() if not df_bbm.empty else 0
+    total_gangguan = len(df_gangguan) if not df_gangguan.empty else 0
+    
+    st.markdown(f"""
+    <div class="kpi-grid">
+        <div class="kpi-card" style="--card-accent: #d4a84b;">
+            <div class="kpi-icon">🚛</div>
+            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-value">{total_rit:,.0f}</div>
+            <div class="kpi-subtitle">trips completed</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #3b82f6;">
+            <div class="kpi-icon">⚖️</div>
+            <div class="kpi-label">Total Tonase</div>
+            <div class="kpi-value">{total_ton:,.0f}</div>
+            <div class="kpi-subtitle">metric tons</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">🏗️</div>
+            <div class="kpi-label">Active Units</div>
+            <div class="kpi-value">{total_exc}</div>
+            <div class="kpi-subtitle">excavators</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #f59e0b;">
+            <div class="kpi-icon">⛽</div>
+            <div class="kpi-label">Fuel Usage</div>
+            <div class="kpi-value">{total_bbm:,.0f}</div>
+            <div class="kpi-subtitle">liters consumed</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #ef4444;">
+            <div class="kpi-icon">🚨</div>
+            <div class="kpi-label">Incidents</div>
+            <div class="kpi-value">{total_gangguan}</div>
+            <div class="kpi-subtitle">reported issues</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ===== MAIN CHARTS ROW =====
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("""
+        <div class="chart-container">
+            <div class="chart-header">
+                <span class="chart-title">📈 Production Trend</span>
+                <span class="chart-badge">Daily</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not df_prod.empty:
+            daily = df_prod.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
+            
+            fig = go.Figure()
+            
+            # Area chart for tonnage
+            fig.add_trace(go.Scatter(
+                x=daily['Date'],
+                y=daily['Tonnase'],
+                name='Tonase',
+                fill='tozeroy',
+                line=dict(color=MINING_COLORS['gold'], width=2),
+                fillcolor='rgba(212,168,75,0.15)',
+                hovertemplate='<b>%{x}</b><br>Tonase: %{y:,.0f}<extra></extra>'
+            ))
+            
+            # Line for ritase
+            fig.add_trace(go.Scatter(
+                x=daily['Date'],
+                y=daily['Rit'] * 50,  # Scale for visibility
+                name='Ritase (scaled)',
+                line=dict(color=MINING_COLORS['blue'], width=2, dash='dot'),
+                hovertemplate='<b>%{x}</b><br>Ritase: %{customdata:,.0f}<extra></extra>',
+                customdata=daily['Rit']
+            ))
+            
+            fig.update_layout(**get_chart_layout(height=320))
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("📊 Production data not available")
+    
+    with col2:
+        st.markdown("""
+        <div class="chart-container">
+            <div class="chart-header">
+                <span class="chart-title">🏗️ By Excavator</span>
+                <span class="chart-badge">Top 6</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not df_prod.empty:
+            exc = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index()
+            exc = exc.sort_values('Tonnase', ascending=True).tail(6)
+            
+            fig = px.bar(
+                exc,
+                x='Tonnase',
+                y='Excavator',
+                orientation='h',
+                color='Tonnase',
+                color_continuous_scale=[[0, '#1e3a5f'], [0.5, '#3b82f6'], [1, '#d4a84b']]
+            )
+            fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+            fig.update_coloraxes(showscale=False)
+            fig.update_traces(hovertemplate='<b>%{y}</b><br>Tonase: %{x:,.0f}<extra></extra>')
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("📊 Data not available")
+    
+    # ===== SECTION DIVIDER =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Distribution Analysis</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ===== DISTRIBUTION CHARTS =====
+    c1, c2, c3, c4 = st.columns(4)
+    
+    with c1:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🪨 Material</span></div></div>', unsafe_allow_html=True)
+        if not df_prod.empty:
+            mat = df_prod.groupby('Commudity')['Tonnase'].sum().reset_index()
+            fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.6, color_discrete_sequence=CHART_SEQUENCE)
+            fig.update_layout(**get_chart_layout(height=220, show_legend=False))
+            fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    with c2:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔄 By Shift</span></div></div>', unsafe_allow_html=True)
+        if not df_prod.empty:
+            shift = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
+            fig = px.bar(shift, x='Shift', y='Tonnase', color='Shift', color_discrete_sequence=CHART_SEQUENCE[:3])
+            fig.update_layout(**get_chart_layout(height=220, show_legend=False))
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    with c3:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🚨 Top Issues</span></div></div>', unsafe_allow_html=True)
+        if not df_gangguan.empty:
+            dg = df_gangguan.head(5)
+            fig = px.bar(dg, x='Frekuensi', y='Row Labels', orientation='h', color_discrete_sequence=[MINING_COLORS['red']])
+            fig.update_layout(**get_chart_layout(height=220, show_legend=False))
+            fig.update_yaxes(categoryorder='total ascending')
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("No data")
+    
+    with c4:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">⛽ Fuel by Type</span></div></div>', unsafe_allow_html=True)
+        if not df_bbm.empty:
+            bbm = df_bbm.groupby('Alat Berat')['Total'].sum().reset_index().head(5)
+            fig = px.pie(bbm, values='Total', names='Alat Berat', hole=0.6, color_discrete_sequence=CHART_SEQUENCE)
+            fig.update_layout(**get_chart_layout(height=220, show_legend=False))
+            fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("No data")
+    
+    # ===== HEATMAP =====
+    if not df_prod.empty:
+        st.markdown("""
+        <div class="section-divider">
+            <div class="section-divider-line"></div>
+            <span class="section-divider-text">Productivity Heatmap</span>
+            <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔥 Shift × Excavator Performance</span></div></div>', unsafe_allow_html=True)
+        
+        pivot = df_prod.pivot_table(values='Tonnase', index='Excavator', columns='Shift', aggfunc='sum', fill_value=0)
+        
+        fig = px.imshow(
+            pivot,
+            color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#3b82f6'], [1, '#d4a84b']],
+            aspect='auto',
+            labels=dict(x="Shift", y="Excavator", color="Tonase")
+        )
+        fig.update_layout(**get_chart_layout(height=300, show_legend=False))
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+
+# ============================================================
+# PLACEHOLDER PAGES (akan dilengkapi di tahap selanjutnya)
+# ============================================================
+def show_produksi():
+    # Page Header
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">📊</div>
+        <div class="page-header-text">
+            <h1>Produksi Harian</h1>
+            <p>Detailed daily production analysis and performance metrics</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    df = load_produksi()
+    
+    if df.empty:
+        st.warning("⚠️ Data produksi tidak tersedia. Pastikan file Excel sudah terhubung.")
+        return
+    
+    # ===== FILTER SECTION =====
+    st.markdown("""
+    <div class="chart-container">
+        <div class="chart-header">
+            <span class="chart-title">🔍 Filter Data</span>
+            <span class="chart-badge">Interactive</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    min_date, max_date = df['Date'].min(), df['Date'].max()
+    
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        start_date = st.date_input("📅 Dari", min_date, min_value=min_date, max_value=max_date)
+    with col2:
+        end_date = st.date_input("📅 Sampai", max_date, min_value=min_date, max_value=max_date)
+    with col3:
+        shifts = ['Semua'] + sorted(df['Shift'].dropna().unique().tolist())
+        selected_shift = st.selectbox("🔄 Shift", shifts)
+    with col4:
+        excavators = ['Semua'] + sorted(df['Excavator'].dropna().unique().tolist())
+        selected_exc = st.selectbox("🏗️ Excavator", excavators)
+    with col5:
+        bloks = ['Semua'] + sorted(df['BLOK'].dropna().unique().tolist())
+        selected_blok = st.selectbox("🧱 BLOK", bloks)
+    with col6:
+        fronts = ['Semua'] + sorted(df['Front'].dropna().unique().tolist())
+        selected_front = st.selectbox("📍 Front", fronts)
+    
+    # Apply filters
+    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
+    if selected_shift != 'Semua':
+        mask &= (df['Shift'] == selected_shift)
+    if selected_exc != 'Semua':
+        mask &= (df['Excavator'] == selected_exc)
+    if selected_blok != 'Semua':
+        mask &= (df['BLOK'] == selected_blok)
+    if selected_front != 'Semua':
+        mask &= (df['Front'] == selected_front)
+    
+    df_filtered = df[mask].copy()
+    
+    # Filter info
+    st.markdown(f"""
+    <p style="color:#64748b; font-size:0.85rem; margin:0.5rem 0 1.5rem 0;">
+        📋 Menampilkan <strong style="color:#d4a84b;">{len(df_filtered):,}</strong> dari {len(df):,} data 
+        &nbsp;|&nbsp; 📅 {start_date} s/d {end_date}
+    </p>
+    """, unsafe_allow_html=True)
+    
+    # ===== KPI CARDS =====
+    total_rit = df_filtered['Rit'].sum()
+    total_ton = df_filtered['Tonnase'].sum()
+    avg_ton = df_filtered['Tonnase'].mean() if len(df_filtered) > 0 else 0
+    total_exc = df_filtered['Excavator'].nunique()
+    total_days = df_filtered['Date'].nunique()
+    
+    st.markdown(f"""
+    <div class="kpi-grid">
+        <div class="kpi-card" style="--card-accent: #d4a84b;">
+            <div class="kpi-icon">🚛</div>
+            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-value">{total_rit:,.0f}</div>
+            <div class="kpi-subtitle">trips</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #3b82f6;">
+            <div class="kpi-icon">⚖️</div>
+            <div class="kpi-label">Total Tonase</div>
+            <div class="kpi-value">{total_ton:,.0f}</div>
+            <div class="kpi-subtitle">metric tons</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">📊</div>
+            <div class="kpi-label">Avg per Trip</div>
+            <div class="kpi-value">{avg_ton:,.1f}</div>
+            <div class="kpi-subtitle">tons/trip</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #f59e0b;">
+            <div class="kpi-icon">🏗️</div>
+            <div class="kpi-label">Excavator</div>
+            <div class="kpi-value">{total_exc}</div>
+            <div class="kpi-subtitle">active units</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #8b5cf6;">
+            <div class="kpi-icon">📅</div>
+            <div class="kpi-label">Hari Kerja</div>
+            <div class="kpi-value">{total_days}</div>
+            <div class="kpi-subtitle">days</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ===== PRODUKSI PER BLOK =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Produksi per BLOK</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🧱 Tonase per BLOK</span></div></div>', unsafe_allow_html=True)
+    
+    blok_prod = df_filtered.groupby('BLOK')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+    
+    fig = px.bar(
+        blok_prod,
+        x='Tonnase',
+        y='BLOK',
+        orientation='h',
+        color='Tonnase',
+        color_continuous_scale=[[0, '#0f2744'], [0.5, '#3b82f6'], [1, '#d4a84b']]
+    )
+    fig.update_layout(**get_chart_layout(height=max(250, len(blok_prod) * 35), show_legend=False))
+    fig.update_coloraxes(showscale=False)
+    fig.update_traces(hovertemplate='<b>%{y}</b><br>Tonase: %{x:,.0f}<extra></extra>')
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    # ===== TREN HARIAN =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Tren Produksi Harian</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📈 Tonase & Ritase Harian</span><span class="chart-badge">Combo Chart</span></div></div>', unsafe_allow_html=True)
+    
+    daily = df_filtered.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
+    
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Bar untuk Ritase
+    fig.add_trace(
+        go.Bar(
+            x=daily['Date'],
+            y=daily['Rit'],
+            name='Ritase',
+            marker_color='rgba(59,130,246,0.6)',
+            hovertemplate='<b>%{x}</b><br>Ritase: %{y:,.0f}<extra></extra>'
+        ),
+        secondary_y=False
+    )
+    
+    # Line untuk Tonase
+    fig.add_trace(
+        go.Scatter(
+            x=daily['Date'],
+            y=daily['Tonnase'],
+            name='Tonase',
+            line=dict(color='#d4a84b', width=3),
+            mode='lines+markers',
+            marker=dict(size=6),
+            hovertemplate='<b>%{x}</b><br>Tonase: %{y:,.0f}<extra></extra>'
+        ),
+        secondary_y=True
+    )
+    
+    fig.update_layout(**get_chart_layout(height=380))
+    fig.update_yaxes(title_text="Ritase", secondary_y=False, showgrid=False, title_font=dict(color='#3b82f6'))
+    fig.update_yaxes(title_text="Tonase", secondary_y=True, gridcolor='rgba(30,58,95,0.5)', title_font=dict(color='#d4a84b'))
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    # ===== DISTRIBUTION CHARTS =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Distribusi Produksi</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔄 Per Shift</span></div></div>', unsafe_allow_html=True)
+        shift_data = df_filtered.groupby('Shift')['Tonnase'].sum().reset_index()
+        fig = px.pie(shift_data, values='Tonnase', names='Shift', hole=0.6, color_discrete_sequence=CHART_SEQUENCE[:3])
+        fig.update_layout(**get_chart_layout(height=280, show_legend=False))
+        fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=12)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    with c2:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🏗️ Per Excavator</span></div></div>', unsafe_allow_html=True)
+        exc_data = df_filtered.groupby('Excavator')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True).tail(8)
+        fig = px.bar(exc_data, x='Tonnase', y='Excavator', orientation='h', color='Tonnase',
+                     color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']])
+        fig.update_layout(**get_chart_layout(height=280, show_legend=False))
+        fig.update_coloraxes(showscale=False)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    with c3:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🪨 Per Material</span></div></div>', unsafe_allow_html=True)
+        mat_data = df_filtered.groupby('Commudity')['Tonnase'].sum().reset_index()
+        fig = px.pie(mat_data, values='Tonnase', names='Commudity', hole=0.6, color_discrete_sequence=CHART_SEQUENCE)
+        fig.update_layout(**get_chart_layout(height=280, show_legend=False))
+        fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=11)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    # ===== ANALISIS PRODUKTIVITAS =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Analisis Produktivitas</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔗 Korelasi Rit vs Tonase</span></div></div>', unsafe_allow_html=True)
+        sample = df_filtered.sample(min(500, len(df_filtered))) if len(df_filtered) > 0 else df_filtered
+        fig = px.scatter(
+            sample, x='Rit', y='Tonnase', color='Shift',
+            color_discrete_sequence=CHART_SEQUENCE[:3],
+            opacity=0.7
+        )
+        fig.update_layout(**get_chart_layout(height=320))
+        fig.update_traces(marker=dict(size=8))
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    with c2:
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔥 Heatmap Shift × Excavator</span></div></div>', unsafe_allow_html=True)
+        pivot = df_filtered.pivot_table(values='Tonnase', index='Excavator', columns='Shift', aggfunc='sum', fill_value=0)
+        fig = px.imshow(
+            pivot,
+            color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#3b82f6'], [1, '#d4a84b']],
+            aspect='auto'
+        )
+        fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    # ===== DATA TABLE =====
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">Data Detail</span>
+        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_dl, col_btn = st.columns([4, 1])
+    with col_btn:
+        cols_export = ['Date', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Rit', 'Tonnase']
+        cols_export = [c for c in cols_export if c in df_filtered.columns]
+        csv = df_filtered[cols_export].to_csv(index=False)
+        st.download_button(
+            "📥 Export CSV",
+            csv,
+            "produksi_filtered.csv",
+            "text/csv",
+            use_container_width=True
+        )
+    
+    # Show dataframe
+    cols_show = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
+    cols_show = [c for c in cols_show if c in df_filtered.columns]
+    st.dataframe(
+        df_filtered[cols_show].sort_values('Date', ascending=False),
+        use_container_width=True,
+        height=400
+    )
+
+def show_gangguan():
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">🚨</div>
+        <div class="page-header-text">
+            <h1>Gangguan Produksi</h1>
+            <p>Production incident analysis</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.info("🚧 Halaman ini akan di-redesign di tahap berikutnya")
+
+def show_monitoring():
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">⛽</div>
+        <div class="page-header-text">
+            <h1>Monitoring BBM & Ritase</h1>
+            <p>Fuel consumption and trip monitoring</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.info("🚧 Halaman ini akan di-redesign di tahap berikutnya")
+
+def show_daily_plan():
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">📋</div>
+        <div class="page-header-text">
+            <h1>Daily Plan & Realisasi</h1>
+            <p>Planning vs actual performance</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.info("🚧 Halaman ini akan di-redesign di tahap berikutnya")
+
+
+# ============================================================
 # MAIN
-# ================================================================
+# ============================================================
 def main():
     if not st.session_state.logged_in:
         show_login()
     else:
         render_sidebar()
-        if st.session_state.current_menu == "Dashboard Overview": show_overview()
-        elif st.session_state.current_menu == "Produksi Harian": show_produksi()
-        elif st.session_state.current_menu == "Gangguan": show_gangguan()
-        elif st.session_state.current_menu == "Monitoring": show_monitoring()
-        elif st.session_state.current_menu == "Daily Plan": show_daily_plan()
+        
+        if st.session_state.current_menu == "Dashboard":
+            show_dashboard()
+        elif st.session_state.current_menu == "Produksi":
+            show_produksi()
+        elif st.session_state.current_menu == "Gangguan":
+            show_gangguan()
+        elif st.session_state.current_menu == "Monitoring":
+            show_monitoring()
+        elif st.session_state.current_menu == "Daily Plan":
+            show_daily_plan()
+
 
 if __name__ == "__main__":
     main()
