@@ -1,300 +1,508 @@
+# ============================================================
+# DATA LOADER - FIXED FOR EXCEL SERIAL DATES
+# ============================================================
+# VERSION: 3.0 - Fixed Excel serial number date parsing
+
 import pandas as pd
 import streamlit as st
-from datetime import datetime
+import requests
+from io import BytesIO
+import base64
 import os
+import sys
+from datetime import datetime, timedelta
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from onedrive_config import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
+except ImportError:
+    ONEDRIVE_LINKS = {}
+    CACHE_TTL = 300
+    LOCAL_FILE_NAMES = {}
+
 
 # ============================================================
-# 1. LOAD PRODUKSI HARIAN
+# HELPER FUNCTIONS
 # ============================================================
-@st.cache_data
-def load_produksi():
-    """Load data produksi harian dengan fix kolom bergeser"""
-    possible_names = [
-        'data/Produksi_UTSG_Harian.xlsx',
-        'data/Produksi UTSG Harian.xlsx',
-        'data/Produksi_UTSG_Harian .xlsx',
-    ]
+
+def convert_onedrive_link(share_link):
+    """Convert OneDrive share link ke direct download link"""
+    if not share_link or share_link.strip() == "":
+        return None
     
-    df = None
-    for file_path in possible_names:
-        if os.path.exists(file_path):
+    share_link = share_link.strip()
+    
+    try:
+        encoded = base64.b64encode(share_link.encode()).decode()
+        encoded = encoded.rstrip('=').replace('/', '_').replace('+', '-')
+        return f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
+    except Exception:
+        return None
+
+
+def download_from_onedrive(share_link, timeout=30):
+    """Download file dari OneDrive"""
+    direct_url = convert_onedrive_link(share_link)
+    
+    if not direct_url:
+        return None
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(direct_url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return BytesIO(response.content)
+    except:
+        return None
+
+
+def load_from_local(file_key):
+    """Load file dari lokasi lokal"""
+    if file_key not in LOCAL_FILE_NAMES:
+        return None
+    
+    for file_path in LOCAL_FILE_NAMES[file_key]:
+        normalized_path = os.path.normpath(file_path)
+        
+        if os.path.exists(normalized_path):
             try:
-                df = pd.read_excel(file_path, sheet_name='Tahun 2025')
-                # File loaded successfully
-                break
-            except Exception as e:
-                pass
+                if os.path.getsize(normalized_path) > 0:
+                    return normalized_path
+            except Exception:
                 continue
     
+    return None
+
+
+def check_onedrive_status():
+    """Enhanced status check"""
+    status = {}
+    
+    for name, link in ONEDRIVE_LINKS.items():
+        if link and link.strip() != "":
+            try:
+                file_buffer = download_from_onedrive(link, timeout=10)
+                if file_buffer:
+                    status[name] = "✅ OneDrive"
+                    continue
+            except:
+                pass
+        
+        local_path = load_from_local(name)
+        if local_path:
+            try:
+                file_size = os.path.getsize(local_path)
+                size_kb = file_size // 1024
+                status[name] = f"✅ Local ({size_kb}KB)"
+            except Exception:
+                status[name] = "⚠️ Local (error)"
+        else:
+            status[name] = "⚠️ No link" if not (link and link.strip()) else "❌ Not found"
+    
+    return status
+
+
+# ============================================================
+# EXCEL SERIAL DATE PARSER
+# ============================================================
+
+def parse_excel_date(date_value):
+    """
+    Parse Excel serial date to Python date
+    Excel stores dates as number of days since 1900-01-01
+    Example: 45870 = 2025-07-12
+    """
+    try:
+        # If already a date/datetime, return as is
+        if isinstance(date_value, (datetime, pd.Timestamp)):
+            return pd.Timestamp(date_value).date()
+        
+        # If string, try to parse
+        if isinstance(date_value, str):
+            parsed = pd.to_datetime(date_value, errors='coerce')
+            if pd.notna(parsed):
+                return parsed.date()
+            return None
+        
+        # If number (Excel serial date)
+        if isinstance(date_value, (int, float)):
+            # Excel epoch starts at 1899-12-30 (not 1900-01-01 due to Excel bug)
+            excel_epoch = datetime(1899, 12, 30)
+            date_result = excel_epoch + timedelta(days=int(date_value))
+            return date_result.date()
+        
+        return None
+        
+    except Exception:
+        return None
+
+
+def safe_parse_date_column(date_series):
+    """Apply Excel date parsing to entire column"""
+    return date_series.apply(parse_excel_date)
+
+
+# ============================================================
+# LOAD PRODUKSI - FIXED VERSION
+# ============================================================
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_produksi():
+    """Load data produksi - FIXED for Excel serial dates"""
+    
+    df = None
+    
+    # Try OneDrive first
+    if ONEDRIVE_LINKS.get("produksi"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='Tahun 2025')
+            except Exception as e:
+                st.warning(f"Failed to load from OneDrive: {e}")
+    
+    # Fallback to local
     if df is None:
-        # File not found
+        local_path = load_from_local("produksi")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Tahun 2025')
+            except Exception as e:
+                st.warning(f"Failed to load from local: {e}")
+    
+    if df is None:
         return pd.DataFrame()
     
     try:
-        # Hapus header berulang & validasi shift
+        # Remove header rows
         df = df[df['Shift'] != 'Shift']
         valid_shifts = ['Shift 1', 'Shift 2', 'Shift 3']
         df = df[df['Shift'].isin(valid_shifts)]
         
-        # --- DATE: pastikan hanya tanggal ---
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
-
-        # --- TIME: biarkan terpisah (string / jam saja) ---
+        # ✅ FIX: Parse Excel Serial Date
+        df['Date'] = safe_parse_date_column(df['Date'])
+        
+        # Remove invalid dates
+        df = df[df['Date'].notna()]
+        
+        # Filter year range (be more lenient - 2020-2030)
+        df = df[df['Date'].apply(lambda x: 2020 <= x.year <= 2030 if x else False)]
+        
+        # Parse Time
         if 'Time' in df.columns:
-            df['Time'] = df['Time'].astype(str)
+            df['Time'] = df['Time'].astype(str).fillna('')
         else:
             df['Time'] = ''
-
-
         
-        # Deteksi & perbaiki kolom bergeser (Sept+)
-        mask_normal = df['Excavator'].astype(str).str.startswith('PC', na=False)
-        df_normal = df[mask_normal].copy()
-        df_shifted = df[~mask_normal].copy()
+        # Check if BLOK column exists (if not, columns are shifted)
+        if 'BLOK' not in df.columns:
+            # Columns are shifted - need to fix
+            df_fixed = pd.DataFrame()
+            df_fixed['Date'] = df['Date']
+            df_fixed['Time'] = df['Time']
+            df_fixed['Shift'] = df['Shift']
+            df_fixed['BLOK'] = df['Front'] if 'Front' in df.columns else ''
+            df_fixed['Front'] = df['Commudity'] if 'Commudity' in df.columns else ''
+            df_fixed['Commudity'] = df['Excavator'] if 'Excavator' in df.columns else ''
+            df_fixed['Excavator'] = df['Dump Truck'] if 'Dump Truck' in df.columns else ''
+            df_fixed['Dump Truck'] = df['Dump Loc'] if 'Dump Loc' in df.columns else ''
+            df_fixed['Dump Loc'] = df['Rit'] if 'Rit' in df.columns else ''
+            df_fixed['Rit'] = df['Tonnase'] if 'Tonnase' in df.columns else 0
+            df_fixed['Tonnase'] = df['Unnamed: 10'] if 'Unnamed: 10' in df.columns else 0
+            
+            df = df_fixed
         
-        if len(df_shifted) > 0:
-            df_shifted_fixed = pd.DataFrame()
-            df_shifted_fixed['Date'] = df_shifted['Date']
-            df_shifted_fixed['Time'] = df_shifted['Time']
-            df_shifted_fixed['Shift'] = df_shifted['Shift']
-
-            # 🔥 BLOK DIAMBIL DARI KOLOM FRONT LAMA
-            df_shifted_fixed['BLOK'] = df_shifted['Front']
-
-            df_shifted_fixed['Front'] = df_shifted['Commudity']
-            df_shifted_fixed['Commudity'] = df_shifted['Excavator']
-            df_shifted_fixed['Excavator'] = df_shifted['Dump Truck']
-            df_shifted_fixed['Dump Truck'] = df_shifted['Dump Loc']
-            df_shifted_fixed['Dump Loc'] = df_shifted['Rit']
-            df_shifted_fixed['Rit'] = df_shifted['Tonnase']
-            df_shifted_fixed['Tonnase'] = df_shifted['Unnamed: 10']
-
-            df = pd.concat([df_normal, df_shifted_fixed], ignore_index=True)
+        # Alternative: Detect shifted rows by checking Excavator column
+        if 'Excavator' in df.columns:
+            mask_normal = df['Excavator'].astype(str).str.startswith('PC', na=False)
+            df_normal = df[mask_normal].copy()
+            df_shifted = df[~mask_normal].copy()
+            
+            if len(df_shifted) > 0 and len(df_normal) > 0:
+                # Fix shifted rows
+                df_shifted_fixed = pd.DataFrame()
+                df_shifted_fixed['Date'] = df_shifted['Date']
+                df_shifted_fixed['Time'] = df_shifted['Time']
+                df_shifted_fixed['Shift'] = df_shifted['Shift']
+                
+                if 'BLOK' in df_shifted.columns:
+                    df_shifted_fixed['BLOK'] = df_shifted['Front']
+                    df_shifted_fixed['Front'] = df_shifted['Commudity']
+                    df_shifted_fixed['Commudity'] = df_shifted['Excavator']
+                    df_shifted_fixed['Excavator'] = df_shifted['Dump Truck']
+                    df_shifted_fixed['Dump Truck'] = df_shifted['Dump Loc']
+                    df_shifted_fixed['Dump Loc'] = df_shifted['Rit']
+                    df_shifted_fixed['Rit'] = df_shifted['Tonnase']
+                    df_shifted_fixed['Tonnase'] = df_shifted.get('Unnamed: 10', 0)
+                else:
+                    # Columns already shifted in original
+                    df_shifted_fixed['BLOK'] = df_shifted['Front']
+                    df_shifted_fixed['Front'] = df_shifted['Commudity']
+                    df_shifted_fixed['Commudity'] = df_shifted['Excavator']
+                    df_shifted_fixed['Excavator'] = df_shifted['Dump Truck']
+                    df_shifted_fixed['Dump Truck'] = df_shifted['Dump Loc']
+                    df_shifted_fixed['Dump Loc'] = df_shifted['Rit']
+                    df_shifted_fixed['Rit'] = df_shifted['Tonnase']
+                    df_shifted_fixed['Tonnase'] = df_shifted.get('Unnamed: 10', 0)
+                
+                df = pd.concat([df_normal, df_shifted_fixed], ignore_index=True)
         
-        # Hapus kolom Unnamed & validasi
+        # Remove unnamed columns
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        
+        # Filter only valid excavators (PC prefix)
         df = df[df['Excavator'].astype(str).str.startswith('PC', na=False)]
         
-        # Clean numeric
-        df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce')
-        df['Tonnase'] = pd.to_numeric(df['Tonnase'], errors='coerce')
+        # Convert numeric columns
+        df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce').fillna(0)
+        df['Tonnase'] = pd.to_numeric(df['Tonnase'], errors='coerce').fillna(0)
         
-        # Clean Dump Truck
+        # Validate Dump Truck
         df['Dump Truck'] = df['Dump Truck'].astype(str)
         df = df[df['Dump Truck'].str.match(r'^\d+$', na=False)]
         
         # Final cleanup
-        df = df.dropna(subset=['Tonnase'])
         df = df[df['Tonnase'] > 0]
         df = df.reset_index(drop=True)
-                # Pastikan kolom selalu ada (untuk bulan lama)
+        
+        # Ensure required columns exist
         for col in ['BLOK', 'Dump Loc']:
             if col not in df.columns:
                 df[col] = ''
-
+        
         return df
         
     except Exception as e:
-        st.error(f"Error processing produksi: {e}")
+        st.error(f"❌ Error processing produksi data: {e}")
+        import traceback
+        st.code(traceback.format_exc())
         return pd.DataFrame()
 
 
 # ============================================================
-# 2. LOAD GANGGUAN
+# OTHER LOAD FUNCTIONS (GANGGUAN, BBM, etc)
 # ============================================================
-@st.cache_data
+
+@st.cache_data(ttl=CACHE_TTL)
 def load_gangguan(bulan):
     """Load data gangguan per bulan"""
-    possible_names = [
-        'data/Gangguan_Produksi_2025_baru.xlsx',
-        'data/Gangguan Produksi 2025 baru.xlsx',
-    ]
-    
     sheet = f'Monitoring {bulan}'
+    df = None
     
-    for file_path in possible_names:
-        if os.path.exists(file_path):
+    if ONEDRIVE_LINKS.get("gangguan"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
+        if file_buffer:
             try:
-                df = pd.read_excel(file_path, sheet_name=sheet, skiprows=1)
-                
-                # Rename kolom
-                if len(df.columns) >= 3:
-                    df.columns = ['Row Labels', 'Frekuensi', 'Persentase']
-                
-                # Clean data
-                df = df[df['Row Labels'] != 'Row Labels']
-                df = df[df['Row Labels'] != 'Grand Total']
-                df['Frekuensi'] = pd.to_numeric(df['Frekuensi'], errors='coerce')
-                df = df.dropna(subset=['Frekuensi'])
-                df = df[df['Frekuensi'] > 0]
-                df = df.reset_index(drop=True)
-                
-                return df
-            except Exception as e:
-                continue
+                df = pd.read_excel(file_buffer, sheet_name=sheet, skiprows=1)
+            except:
+                pass
     
-    return pd.DataFrame()
+    if df is None:
+        local_path = load_from_local("gangguan")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name=sheet, skiprows=1)
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        if len(df.columns) >= 3:
+            df.columns = ['Row Labels', 'Frekuensi', 'Persentase']
+        
+        df = df[df['Row Labels'] != 'Row Labels']
+        df = df[df['Row Labels'] != 'Grand Total']
+        df['Frekuensi'] = pd.to_numeric(df['Frekuensi'], errors='coerce')
+        df = df.dropna(subset=['Frekuensi'])
+        df = df[df['Frekuensi'] > 0]
+        df = df.reset_index(drop=True)
+        
+        return df
+    except:
+        return pd.DataFrame()
 
 
-# ============================================================
-# 3. LOAD BBM
-# ============================================================
-@st.cache_data
+@st.cache_data(ttl=CACHE_TTL)
 def load_bbm():
     """Load data BBM"""
-    possible_names = [
-        'data/Monitoring_2025_.xlsx',
-        'data/Monitoring 2025_.xlsx',
-    ]
+    df = None
     
-    for file_path in possible_names:
-        if os.path.exists(file_path):
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
             try:
-                df = pd.read_excel(file_path, sheet_name='BBM')
-                
-                # Hapus baris header yang ikut terbaca
-                if 'Total' in df.columns:
-                    df = df[df['Total'] != 'Total']
-                    df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
-                
-                # Convert kolom tanggal (1-31) ke numerik
-                for col in df.columns:
-                    if col not in ['No', 'Alat Berat', 'Tipe Alat', 'Total']:
-                        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
-                # Filter data valid
-                df = df[df['No'].notna()]
-                df = df[df['Alat Berat'].notna()]
-                df = df.reset_index(drop=True)
-                
-                return df
-            except Exception as e:
-                continue
+                df = pd.read_excel(file_buffer, sheet_name='BBM')
+            except:
+                pass
     
-    return pd.DataFrame()
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='BBM')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        if 'Total' in df.columns:
+            df = df[df['Total'] != 'Total']
+            df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
+        
+        for col in df.columns:
+            if col not in ['No', 'Alat Berat', 'Tipe Alat', 'Total']:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        df = df[df['No'].notna()]
+        df = df[df['Alat Berat'].notna()]
+        df = df.reset_index(drop=True)
+        
+        return df
+    except:
+        return pd.DataFrame()
 
 
-# ============================================================
-# 4. LOAD ANALISA PRODUKSI (Plan vs Aktual)
-# ============================================================
-@st.cache_data
+@st.cache_data(ttl=CACHE_TTL)
 def load_analisa_produksi(bulan='Januari'):
     """Load data analisa produksi per bulan"""
-    possible_names = [
-        'data/Monitoring_2025_.xlsx',
-        'data/Monitoring 2025_.xlsx',
-    ]
-    
-    # Mapping bulan ke index kolom
-    bulan_map = {
-        'Januari': 0,
-        'Februari': 5,
-    }
+    bulan_map = {'Januari': 0, 'Februari': 5}
     
     if bulan not in bulan_map:
         return pd.DataFrame()
     
     start_col = bulan_map[bulan]
+    df = None
     
-    for file_path in possible_names:
-        if os.path.exists(file_path):
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
             try:
-                df = pd.read_excel(file_path, sheet_name='Analisa Produksi')
-                
-                # Ambil kolom untuk bulan tertentu
-                df_bulan = df.iloc[1:32, start_col:start_col+4].copy()
-                df_bulan.columns = ['Tanggal', 'Plan', 'Aktual', 'Ketercapaian']
-                
-                # Clean data
-                df_bulan['Tanggal'] = pd.to_numeric(df_bulan['Tanggal'], errors='coerce')
-                df_bulan['Plan'] = pd.to_numeric(df_bulan['Plan'], errors='coerce')
-                df_bulan['Aktual'] = pd.to_numeric(df_bulan['Aktual'], errors='coerce')
-                df_bulan['Ketercapaian'] = pd.to_numeric(df_bulan['Ketercapaian'], errors='coerce')
-                
-                df_bulan = df_bulan.dropna(subset=['Tanggal'])
-                df_bulan['Bulan'] = bulan
-                df_bulan = df_bulan.reset_index(drop=True)
-                
-                return df_bulan
-            except Exception as e:
-                continue
+                df = pd.read_excel(file_buffer, sheet_name='Analisa Produksi')
+            except:
+                pass
     
-    return pd.DataFrame()
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Analisa Produksi')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        df_bulan = df.iloc[1:32, start_col:start_col+4].copy()
+        df_bulan.columns = ['Tanggal', 'Plan', 'Aktual', 'Ketercapaian']
+        
+        df_bulan['Tanggal'] = pd.to_numeric(df_bulan['Tanggal'], errors='coerce')
+        df_bulan['Plan'] = pd.to_numeric(df_bulan['Plan'], errors='coerce')
+        df_bulan['Aktual'] = pd.to_numeric(df_bulan['Aktual'], errors='coerce')
+        df_bulan['Ketercapaian'] = pd.to_numeric(df_bulan['Ketercapaian'], errors='coerce')
+        
+        df_bulan = df_bulan.dropna(subset=['Tanggal'])
+        df_bulan['Bulan'] = bulan
+        df_bulan = df_bulan.reset_index(drop=True)
+        
+        return df_bulan
+    except:
+        return pd.DataFrame()
 
 
-# ============================================================
-# 5. LOAD RITASE
-# ============================================================
-@st.cache_data
+@st.cache_data(ttl=CACHE_TTL)
 def load_ritase():
-    """Load data ritase dengan cleaning"""
-    possible_names = [
-        'data/Monitoring_2025_.xlsx',
-        'data/Monitoring 2025_.xlsx',
-    ]
+    """Load data ritase"""
+    df = None
     
-    for file_path in possible_names:
-        if os.path.exists(file_path):
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
             try:
-                df = pd.read_excel(file_path, sheet_name='Ritase')
-                
-                # Kolom yang dibutuhkan (sampai kolom 16)
-                cols_keep = ['Tanggal', 'Shift', 'Pengawasan', 'Front B LS', 'Front B Clay', 
-                            'Front B LS MIX', 'Front C LS', 'Front C LS MIX', 'PLB LS', 
-                            'PLB SS', 'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
-                            'PLT LS MIX', 'Stockpile 6 ']
-                
-                available_cols = [col for col in cols_keep if col in df.columns]
-                df = df[available_cols].copy()
-                
-                # Convert Tanggal
-                df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-                df = df[df['Tanggal'].notna()]
-                
-                # Hapus baris dengan Shift bukan angka
-                df = df[df['Shift'].isin([1, 2, 3, '1', '2', '3'])]
-                df['Shift'] = df['Shift'].astype(str)
-                
-                # Convert kolom numerik
-                numeric_cols = [col for col in df.columns if col not in ['Tanggal', 'Shift', 'Pengawasan']]
-                for col in numeric_cols:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
-                df = df.reset_index(drop=True)
-                return df
-            except Exception as e:
-                continue
+                df = pd.read_excel(file_buffer, sheet_name='Ritase')
+            except:
+                pass
     
-    return pd.DataFrame()
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Ritase')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        cols_keep = ['Tanggal', 'Shift', 'Pengawasan', 'Front B LS', 'Front B Clay', 
+                    'Front B LS MIX', 'Front C LS', 'Front C LS MIX', 'PLB LS', 
+                    'PLB SS', 'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
+                    'PLT LS MIX', 'Stockpile 6 ']
+        
+        available_cols = [col for col in cols_keep if col in df.columns]
+        df = df[available_cols].copy()
+        
+        df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
+        df = df[df['Tanggal'].notna()]
+        
+        df = df[df['Shift'].isin([1, 2, 3, '1', '2', '3'])]
+        df['Shift'] = df['Shift'].astype(str)
+        
+        numeric_cols = [col for col in df.columns if col not in ['Tanggal', 'Shift', 'Pengawasan']]
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        df = df.reset_index(drop=True)
+        return df
+    except:
+        return pd.DataFrame()
 
 
-# ============================================================
-# 6. LOAD DAILY PLAN
-# ============================================================
-@st.cache_data
+@st.cache_data(ttl=CACHE_TTL)
 def load_daily_plan():
     """Load data daily plan scheduling"""
+    df = None
+    
+    if ONEDRIVE_LINKS.get("daily_plan"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='W22 Scheduling', skiprows=1)
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("daily_plan")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='W22 Scheduling', skiprows=1)
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
     try:
-        df = pd.read_excel('data/DAILY_PLAN.xlsx', sheet_name='W22 Scheduling', skiprows=1)
-        
-        # Rename kolom dari baris pertama
         new_cols = ['No', 'Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 
                     'Clay', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan']
         
         if len(df.columns) >= len(new_cols):
             df.columns = new_cols + list(df.columns[len(new_cols):])
         
-        # Skip header row
         df = df.iloc[1:].copy()
+        df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
         
-        # Clean Tanggal
-        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-        
-        # Filter data valid
         df = df[df['Hari'].notna()]
         df = df[df['Hari'] != 'Hari']
         
-        # Ambil kolom yang dibutuhkan
         cols_keep = ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay', 
                      'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan']
         available = [c for c in cols_keep if c in df.columns]
@@ -304,21 +512,35 @@ def load_daily_plan():
         df = df.reset_index(drop=True)
         
         return df
-    except Exception as e:
-        pass
+    except:
         return pd.DataFrame()
 
 
-# ============================================================
-# 7. LOAD REALISASI
-# ============================================================
-@st.cache_data
+@st.cache_data(ttl=CACHE_TTL)
 def load_realisasi():
-    """Load data realisasi dari W22 realisasi"""
+    """Load data realisasi"""
+    df = None
+    
+    if ONEDRIVE_LINKS.get("daily_plan"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='W22 realisasi', skiprows=1)
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("daily_plan")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='W22 realisasi', skiprows=1)
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
     try:
-        df = pd.read_excel('data/DAILY_PLAN.xlsx', sheet_name='W22 realisasi', skiprows=1)
-        
-        # Rename kolom
         new_cols = ['No', 'Hari', 'Tanggal', 'Week', 'Shift', 'Batu Kapur', 'Silika', 
                     'Timbunan', 'Alat Bor', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 
                     'ROM', 'Keterangan']
@@ -326,13 +548,9 @@ def load_realisasi():
         if len(df.columns) >= len(new_cols):
             df.columns = new_cols + list(df.columns[len(new_cols):])
         
-        # Skip header row
         df = df.iloc[1:].copy()
+        df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
         
-        # Clean Tanggal
-        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-        
-        # Filter valid
         df = df[df['Hari'].notna()]
         df = df[df['Hari'] != 'Hari']
         
@@ -346,6 +564,5 @@ def load_realisasi():
         df = df.reset_index(drop=True)
         
         return df
-    except Exception as e:
-        pass
+    except:
         return pd.DataFrame()

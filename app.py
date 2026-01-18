@@ -7,9 +7,11 @@ import numpy as np
 from datetime import datetime
 import os
 import sys
+
 sys.path.append('.')
 from utils.data_loader import *
 from config import USERS, COLORS, CHART_COLORS
+from onedrive_config import CACHE_TTL
 
 st.set_page_config(page_title="Dashboard Tambang Semen Padang", page_icon="⛏️", layout="wide")
 
@@ -34,6 +36,7 @@ div[data-testid="stFileUploader"] {background:#21262d;border-radius:8px;padding:
 div[data-testid="stDateInput"] input {background:#21262d;border:1px solid #30363d;color:#fff;}
 .overview-card {background:linear-gradient(145deg,#1e2a3a,#16213e);border-radius:16px;padding:1.5rem;border:1px solid #30363d;margin-bottom:1rem;}
 .overview-title {color:#58a6ff;font-size:1.1rem;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;}
+.status-box {background:#21262d;border-radius:8px;padding:0.5rem 0.8rem;margin:0.3rem 0;font-size:0.8rem;color:#c9d1d9;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,52 +64,15 @@ def chart_layout(title=None, height=300):
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         height=height,
-        margin=dict(
-            l=60,
-            r=30,
-            t=50 if title else 30,
-            b=60
-        ),
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            automargin=True
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor='#21262d',
-            zeroline=False,
-            automargin=True
-        ),
-        legend=dict(
-            orientation='h',
-            y=-0.25,
-            x=0.5,
-            xanchor='center'
-        )
+        margin=dict(l=60, r=30, t=50 if title else 30, b=60),
+        xaxis=dict(showgrid=False, zeroline=False, automargin=True),
+        yaxis=dict(showgrid=True, gridcolor='#21262d', zeroline=False, automargin=True),
+        legend=dict(orientation='h', y=-0.25, x=0.5, xanchor='center')
     )
-
     if title:
-        layout["title"] = dict(
-            text=title,
-            x=0.5,
-            font=dict(size=14)
-        )
-
+        layout["title"] = dict(text=title, x=0.5, font=dict(size=14))
     return layout
 
-
-def handle_upload(uploaded_file, target_name):
-    if uploaded_file:
-        try:
-            upload_path = f"data/{target_name}"
-            with open(upload_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.cache_data.clear()
-            return True
-        except:
-            return False
-    return False
 
 # LOGIN PAGE
 def show_login():
@@ -126,6 +92,7 @@ def show_login():
                 if login(u, p): st.rerun()
                 else: st.error("❌ Login gagal!")
         st.caption("Demo: admin_produksi/prod123")
+
 
 # ================================================================
 # DASHBOARD OVERVIEW
@@ -203,17 +170,11 @@ def show_overview():
         st.markdown('<div class="section-title">🚨 Top Gangguan</div>', unsafe_allow_html=True)
         if not df_gangguan.empty:
             dg_top = df_gangguan.head(5)
-            fig = px.bar(
-                dg_top,
-                x='Frekuensi',
-                y='Row Labels',
-                orientation='h',
-                color_discrete_sequence=['#f85149']
-            )
+            fig = px.bar(dg_top, x='Frekuensi', y='Row Labels', orientation='h',
+                        color_discrete_sequence=['#f85149'])
             fig.update_layout(**chart_layout(height=200))
             fig.update_yaxes(categoryorder='total ascending')
             st.plotly_chart(fig, use_container_width=True)
-
         else:
             st.info("Data tidak tersedia")
     
@@ -238,136 +199,71 @@ def show_overview():
         fig.update_layout(**chart_layout(height=280))
         st.plotly_chart(fig, use_container_width=True)
 
+
 # ================================================================
 # PRODUKSI HARIAN
 # ================================================================
 def show_produksi():
-    col_title, col_upload = st.columns([3,1])
-    with col_title:
-        st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📊 Produksi Harian</h2>', unsafe_allow_html=True)
-    with col_upload:
-        with st.expander("📤 Upload Data Produksi"):
-            up = st.file_uploader("Upload file Excel", type=['xlsx','xls'], key="up_prod_main", label_visibility="collapsed")
-            if up and handle_upload(up, "Produksi_UTSG_Harian.xlsx"):
-                st.success("✅ Data berhasil diupload!")
-                st.rerun()
+    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📊 Produksi Harian</h2>', unsafe_allow_html=True)
     
     df = load_produksi()
     if df.empty: 
-        st.warning("⚠️ Data tidak tersedia. Upload file Produksi_UTSG_Harian.xlsx")
+        st.warning("⚠️ Data tidak tersedia. Pastikan link OneDrive sudah dikonfigurasi atau file lokal tersedia.")
         return
     
-    # =========================
     # Filter
-    # =========================
     st.markdown('<div class="section-title">🔍 Filter Data</div>', unsafe_allow_html=True)
-
     col_f1, col_f2, col_f3, col_f4, col_f5, col_f6 = st.columns(6)
-
-    # tanggal min max
+    
     min_date, max_date = df['Date'].min(), df['Date'].max()
-
+    
     with col_f1:
-        start_date = st.date_input(
-            "📅 Dari Tanggal",
-            min_date,
-            min_value=min_date,
-            max_value=max_date
-        )
-
+        start_date = st.date_input("📅 Dari Tanggal", min_date, min_value=min_date, max_value=max_date)
     with col_f2:
-        end_date = st.date_input(
-            "📅 Sampai Tanggal",
-            max_date,
-            min_value=min_date,
-            max_value=max_date
-        )
-
+        end_date = st.date_input("📅 Sampai Tanggal", max_date, min_value=min_date, max_value=max_date)
     with col_f3:
-        selected_shift = st.selectbox(
-            "🔄 Shift",
-            ['Semua'] + sorted(df['Shift'].dropna().unique().tolist())
-        )
-
+        selected_shift = st.selectbox("🔄 Shift", ['Semua'] + sorted(df['Shift'].dropna().unique().tolist()))
     with col_f4:
-        selected_exc = st.selectbox(
-            "🏗️ Excavator",
-            ['Semua'] + sorted(df['Excavator'].dropna().unique().tolist())
-        )
-
+        selected_exc = st.selectbox("🏗️ Excavator", ['Semua'] + sorted(df['Excavator'].dropna().unique().tolist()))
     with col_f5:
-        selected_blok = st.selectbox(
-            "🧱 BLOK",
-            ['Semua'] + sorted(df['BLOK'].dropna().unique().tolist())
-        )
-
+        selected_blok = st.selectbox("🧱 BLOK", ['Semua'] + sorted(df['BLOK'].dropna().unique().tolist()))
     with col_f6:
-        selected_front = st.selectbox(
-            "📍 Front",
-            ['Semua'] + sorted(df['Front'].dropna().unique().tolist())
-        )
+        selected_front = st.selectbox("📍 Front", ['Semua'] + sorted(df['Front'].dropna().unique().tolist()))
 
-    # =========================
     # Filtering logic
-    # =========================
     mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
-
-    if selected_shift != 'Semua':
-        mask &= (df['Shift'] == selected_shift)
-
-    if selected_exc != 'Semua':
-        mask &= (df['Excavator'] == selected_exc)
-
-    if selected_blok != 'Semua':
-        mask &= (df['BLOK'] == selected_blok)
-
-    if selected_front != 'Semua':
-        mask &= (df['Front'] == selected_front)
-
+    if selected_shift != 'Semua': mask &= (df['Shift'] == selected_shift)
+    if selected_exc != 'Semua': mask &= (df['Excavator'] == selected_exc)
+    if selected_blok != 'Semua': mask &= (df['BLOK'] == selected_blok)
+    if selected_front != 'Semua': mask &= (df['Front'] == selected_front)
     df_filtered = df[mask].copy()
 
-    st.markdown(
-        f'<p style="color:#8b949e;font-size:0.8rem;">'
-        f'Menampilkan {len(df_filtered):,} dari {len(df):,} data | '
-        f'{start_date} s/d {end_date}'
-        f'</p>',
-        unsafe_allow_html=True
-    )
+    st.markdown(f'<p style="color:#8b949e;font-size:0.8rem;">Menampilkan {len(df_filtered):,} dari {len(df):,} data | {start_date} s/d {end_date}</p>', unsafe_allow_html=True)
 
     # KPI
     cols = st.columns(5)
-    kpis = [("🚛","RITASE",f"{df_filtered['Rit'].sum():,.0f}"),("⚖️","TONASE",f"{df_filtered['Tonnase'].sum():,.0f}"),
-            ("📊","AVG/TRIP",f"{df_filtered['Tonnase'].mean():.0f}" if len(df_filtered)>0 else "0"),
-            ("🏗️","EXCAVATOR",f"{df_filtered['Excavator'].nunique()}"),("📅","HARI",f"{df_filtered['Date'].nunique()}")]
+    kpis = [
+        ("🚛","RITASE",f"{df_filtered['Rit'].sum():,.0f}"),
+        ("⚖️","TONASE",f"{df_filtered['Tonnase'].sum():,.0f}"),
+        ("📊","AVG/TRIP",f"{df_filtered['Tonnase'].mean():.0f}" if len(df_filtered)>0 else "0"),
+        ("🏗️","EXCAVATOR",f"{df_filtered['Excavator'].nunique()}"),
+        ("📅","HARI",f"{df_filtered['Date'].nunique()}")
+    ]
     for col,(icon,label,val) in zip(cols,kpis):
         col.markdown(f'<div class="metric-card"><div class="metric-icon">{icon}</div><div class="metric-label">{label}</div><div class="metric-value">{val}</div></div>', unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Produksi per BLOK
     st.markdown('<div class="section-title">🧱 Produksi per BLOK</div>', unsafe_allow_html=True)
-
-    blok_prod = (
-        df_filtered
-        .groupby('BLOK')['Tonnase']
-        .sum()
-        .reset_index()
-        .sort_values('Tonnase', ascending=True)
-    )
-
-    fig = px.bar(
-        blok_prod,
-        x='Tonnase',
-        y='BLOK',
-        orientation='h',
-        color='Tonnase',
-        color_continuous_scale='Greens'
-    )
-
+    blok_prod = df_filtered.groupby('BLOK')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+    fig = px.bar(blok_prod, x='Tonnase', y='BLOK', orientation='h', color='Tonnase', color_continuous_scale='Greens')
     fig.update_layout(**chart_layout(height=350))
     fig.update_coloraxes(showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
     # Combo Chart
-    st.markdown('<div class="section-title">📈 Tren Produksi Harian - Tonase & Ritase (Combo Chart)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📈 Tren Produksi Harian - Tonase & Ritase</div>', unsafe_allow_html=True)
     daily = df_filtered.groupby('Date').agg({'Tonnase':'sum','Rit':'sum'}).reset_index()
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=daily['Date'], y=daily['Rit'], name='Ritase', marker_color='rgba(88,166,255,0.6)'), secondary_y=False)
@@ -380,7 +276,7 @@ def show_produksi():
     # Distribution Charts
     c1,c2,c3 = st.columns(3)
     with c1:
-        st.markdown('<div class="section-title">🔄 Distribusi Shift (Donut)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔄 Distribusi Shift</div>', unsafe_allow_html=True)
         shift_data = df_filtered.groupby('Shift')['Tonnase'].sum().reset_index()
         fig = px.pie(shift_data, values='Tonnase', names='Shift', hole=0.5, color_discrete_sequence=['#00E676','#58a6ff','#f0883e'])
         fig.update_layout(**chart_layout(height=280))
@@ -388,7 +284,7 @@ def show_produksi():
         st.plotly_chart(fig, use_container_width=True)
     
     with c2:
-        st.markdown('<div class="section-title">🏗️ Per Excavator (Horizontal Bar)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🏗️ Per Excavator</div>', unsafe_allow_html=True)
         exc = df_filtered.groupby('Excavator')['Tonnase'].sum().reset_index().sort_values('Tonnase')
         fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h', color='Tonnase', color_continuous_scale='Greens')
         fig.update_layout(**chart_layout(height=280))
@@ -396,144 +292,60 @@ def show_produksi():
         st.plotly_chart(fig, use_container_width=True)
     
     with c3:
-        st.markdown('<div class="section-title">🪨 Material (Donut)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🪨 Material</div>', unsafe_allow_html=True)
         mat = df_filtered.groupby('Commudity')['Tonnase'].sum().reset_index()
         fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5, color_discrete_sequence=['#00E676','#58a6ff','#f0883e','#a371f7'])
         fig.update_layout(**chart_layout(height=280))
         st.plotly_chart(fig, use_container_width=True)
     
-    # =========================================================
-    # ANALISIS PRODUKTIVITAS
-    # =========================================================
-    st.markdown(
-        """
-        <div style="
-            margin-top:20px;
-            margin-bottom:10px;
-            padding-left:6px;
-            border-left:4px solid #00E676;
-        ">
-            <h3 style="margin:0;color:#e6edf3;">
-                📊 Analisis Produktivitas
-            </h3>
-            <p style="margin:4px 0 0 0;color:#8b949e;font-size:0.85rem;">
-                Hubungan ritase, tonase, dan pola waktu produksi
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    # Analisis Produktivitas
+    st.markdown("""
+    <div style="margin-top:20px;margin-bottom:10px;padding-left:6px;border-left:4px solid #00E676;">
+        <h3 style="margin:0;color:#e6edf3;">📊 Analisis Produktivitas</h3>
+        <p style="margin:4px 0 0 0;color:#8b949e;font-size:0.85rem;">Hubungan ritase, tonase, dan pola waktu produksi</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # =========================================================
-    # Scatter & Heatmap
-    # =========================================================
     c1, c2 = st.columns(2)
-
     with c1:
-        st.markdown(
-            '<div class="section-title">🔗 Korelasi Rit vs Tonase</div>',
-            unsafe_allow_html=True
-        )
-
-        sample = (
-            df_filtered.sample(min(500, len(df_filtered)))
-            if not df_filtered.empty
-            else df_filtered
-        )
-
-        fig = px.scatter(
-            sample,
-            x='Rit',
-            y='Tonnase',
-            color='Shift',
-            color_discrete_sequence=['#00E676', '#58a6ff', '#f0883e'],
-            opacity=0.7
-        )
+        st.markdown('<div class="section-title">🔗 Korelasi Rit vs Tonase</div>', unsafe_allow_html=True)
+        sample = df_filtered.sample(min(500, len(df_filtered))) if not df_filtered.empty else df_filtered
+        fig = px.scatter(sample, x='Rit', y='Tonnase', color='Shift',
+                        color_discrete_sequence=['#00E676', '#58a6ff', '#f0883e'], opacity=0.7)
         fig.update_layout(**chart_layout(height=300))
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        st.markdown(
-            '<div class="section-title">⏱️ Heatmap Produksi (Jam × Shift)</div>',
-            unsafe_allow_html=True
-        )
-
-        # Ambil jam awal dari kolom Time (07:00-08:00 → 7)
-        df_filtered['Jam'] = (
-            df_filtered['Time']
-            .astype(str)
-            .str.split(':')
-            .str[0]
-            .astype(int)
-        )
-
-        all_hours = list(range(24))
-
-        pivot = (
-            df_filtered
-            .pivot_table(
-                values='Tonnase',
-                index='Shift',
-                columns='Jam',
-                aggfunc='sum'
-            )
-            .reindex(columns=all_hours, fill_value=0)
-        )
-
-        fig = px.imshow(
-            pivot,
-            color_continuous_scale='Greens',
-            aspect='auto',
-            labels=dict(x="Jam", y="Shift", color="Tonase")
-        )
-
-        fig.update_layout(
-            height=320,
-            xaxis=dict(tickmode='array', tickvals=all_hours)
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-       
+        st.markdown('<div class="section-title">⏱️ Heatmap Produksi (Jam × Shift)</div>', unsafe_allow_html=True)
+        if 'Time' in df_filtered.columns:
+            try:
+                df_filtered['Jam'] = df_filtered['Time'].astype(str).str.split(':').str[0].astype(int)
+                all_hours = list(range(24))
+                pivot = df_filtered.pivot_table(values='Tonnase', index='Shift', columns='Jam', aggfunc='sum').reindex(columns=all_hours, fill_value=0)
+                fig = px.imshow(pivot, color_continuous_scale='Greens', aspect='auto',
+                               labels=dict(x="Jam", y="Shift", color="Tonase"))
+                fig.update_layout(height=320, xaxis=dict(tickmode='array', tickvals=all_hours))
+                st.plotly_chart(fig, use_container_width=True)
+            except:
+                st.info("Data jam tidak tersedia")
+    
     # Data Table
     st.markdown('<div class="section-title">📋 Data Detail</div>', unsafe_allow_html=True)
     col_dl1, col_dl2 = st.columns([4,1])
     with col_dl2:
         csv = df_filtered[['Date','Shift','Front','Commudity','Excavator','Dump Truck','Rit','Tonnase']].to_csv(index=False)
         st.download_button("📥 Download CSV", csv, "produksi_filtered.csv", "text/csv", use_container_width=True)
-    cols_detail = [
-        'Date',
-        'Time',
-        'Shift',
-        'BLOK',
-        'Front',
-        'Commudity',
-        'Excavator',
-        'Dump Truck',
-        'Dump Loc',
-        'Rit',
-        'Tonnase'
-    ]
-
+    
+    cols_detail = ['Date','Time','Shift','BLOK','Front','Commudity','Excavator','Dump Truck','Dump Loc','Rit','Tonnase']
     cols_detail = [c for c in cols_detail if c in df_filtered.columns]
+    st.dataframe(df_filtered[cols_detail].sort_values('Date', ascending=False), use_container_width=True, height=300)
 
-    st.dataframe(
-        df_filtered[cols_detail].sort_values('Date', ascending=False),
-        use_container_width=True,
-        height=300
-    )
+
 # ================================================================
 # GANGGUAN
 # ================================================================
 def show_gangguan():
-    col_title, col_upload = st.columns([3,1])
-    with col_title:
-        st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">🚨 Analisis Gangguan Produksi</h2>', unsafe_allow_html=True)
-    with col_upload:
-        with st.expander("📤 Upload Data Gangguan"):
-            up = st.file_uploader("Upload file Excel", type=['xlsx','xls'], key="up_gang_main", label_visibility="collapsed")
-            if up and handle_upload(up, "Gangguan_Produksi_2025_baru.xlsx"):
-                st.success("✅ Data berhasil diupload!")
-                st.rerun()
+    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">🚨 Analisis Gangguan Produksi</h2>', unsafe_allow_html=True)
     
     bulan = st.selectbox("Pilih Bulan", ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"])
     dg = load_gangguan(bulan)
@@ -559,28 +371,21 @@ def show_gangguan():
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            st.markdown('<div class="section-title">🥧 Proporsi Gangguan (Pie)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-title">🥧 Proporsi Gangguan</div>', unsafe_allow_html=True)
             fig = px.pie(dg.head(8), values='Frekuensi', names='Row Labels', hole=0.4, color_discrete_sequence=px.colors.sequential.Reds_r)
             fig.update_layout(**chart_layout(height=400))
             st.plotly_chart(fig, use_container_width=True)
         
         st.dataframe(dg, use_container_width=True, height=250)
     else:
-        st.info(f"Data gangguan bulan {bulan} tidak tersedia. Upload file Gangguan_Produksi_2025_baru.xlsx")
+        st.info(f"Data gangguan bulan {bulan} tidak tersedia.")
+
 
 # ================================================================
 # MONITORING
 # ================================================================
 def show_monitoring():
-    col_title, col_upload = st.columns([3,1])
-    with col_title:
-        st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">⛽ Monitoring BBM & Ritase</h2>', unsafe_allow_html=True)
-    with col_upload:
-        with st.expander("📤 Upload Data Monitoring"):
-            up = st.file_uploader("Upload file Excel", type=['xlsx','xls'], key="up_mon_main", label_visibility="collapsed")
-            if up and handle_upload(up, "Monitoring_2025_.xlsx"):
-                st.success("✅ Data berhasil diupload!")
-                st.rerun()
+    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">⛽ Monitoring BBM & Ritase</h2>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["⛽ BBM", "🚛 Ritase"])
     
@@ -602,21 +407,15 @@ def show_monitoring():
             
             with col2:
                 st.markdown('<div class="section-title">🔝 Top 10 Konsumsi BBM</div>', unsafe_allow_html=True)
-                fig = px.bar(
-                    db.nlargest(10,'Total'),
-                    x='Total',
-                    y='Tipe Alat',
-                    orientation='h',
-                    color='Total',
-                    color_continuous_scale='OrRd'
-                )
+                fig = px.bar(db.nlargest(10,'Total'), x='Total', y='Tipe Alat', orientation='h', color='Total', color_continuous_scale='OrRd')
                 fig.update_layout(**chart_layout(height=350))
                 fig.update_yaxes(categoryorder='total ascending')
                 fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True)   
-                st.dataframe(db, use_container_width=True, height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.dataframe(db, use_container_width=True, height=300)
         else:
-            st.info("Data BBM tidak tersedia. Upload file Monitoring_2025_.xlsx")
+            st.info("Data BBM tidak tersedia.")
     
     with tab2:
         st.markdown('<div class="section-title">🚛 Ritase per Front</div>', unsafe_allow_html=True)
@@ -634,19 +433,12 @@ def show_monitoring():
         else:
             st.info("Data ritase tidak tersedia")
 
+
 # ================================================================
 # DAILY PLAN
 # ================================================================
 def show_daily_plan():
-    col_title, col_upload = st.columns([3,1])
-    with col_title:
-        st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📋 Daily Plan & Realisasi</h2>', unsafe_allow_html=True)
-    with col_upload:
-        with st.expander("📤 Upload Data Daily Plan"):
-            up = st.file_uploader("Upload file Excel", type=['xlsx','xls'], key="up_daily_main", label_visibility="collapsed")
-            if up and handle_upload(up, "DAILY_PLAN.xlsx"):
-                st.success("✅ Data berhasil diupload!")
-                st.rerun()
+    st.markdown('<h2 style="color:#fff;margin-bottom:1rem;">📋 Daily Plan & Realisasi</h2>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📅 Scheduling", "✅ Realisasi"])
     
@@ -664,12 +456,8 @@ def show_daily_plan():
             
             st.markdown('<div class="section-title">📋 Data Scheduling</div>', unsafe_allow_html=True)
             st.dataframe(dp, use_container_width=True, height=400)
-            
-            # Placeholder Peta
-            st.markdown('<div class="section-title">🗺️ Peta Lokasi (Coming Soon)</div>', unsafe_allow_html=True)
-            st.info("📍 Fitur peta akan menggunakan data Blok, Grid, dan ROM untuk menampilkan lokasi penambangan.")
         else:
-            st.info("Data scheduling tidak tersedia. Upload file DAILY_PLAN.xlsx")
+            st.info("Data scheduling tidak tersedia.")
     
     with tab2:
         dr = load_realisasi()
@@ -688,6 +476,7 @@ def show_daily_plan():
         else:
             st.info("Data realisasi tidak tersedia")
 
+
 # ================================================================
 # SIDEBAR
 # ================================================================
@@ -704,6 +493,24 @@ def render_sidebar():
         """, unsafe_allow_html=True)
         
         st.markdown("---")
+        
+        # STATUS KONEKSI ONEDRIVE
+        st.markdown('<p style="color:#58a6ff;font-size:0.85rem;font-weight:600;">📡 STATUS ONEDRIVE</p>', unsafe_allow_html=True)
+        
+        status = check_onedrive_status()
+        for name, stat in status.items():
+            st.markdown(f'<div class="status-box">{name}: {stat}</div>', unsafe_allow_html=True)
+        
+        # Tombol Refresh
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            st.caption(f"⏱️ {CACHE_TTL//60}m")
+        
+        st.markdown("---")
         st.markdown('<p style="color:#58a6ff;font-size:0.85rem;font-weight:600;">📋 MENU NAVIGASI</p>', unsafe_allow_html=True)
         
         menus = [("🏠","Dashboard Overview"),("📊","Produksi Harian"),("🚨","Gangguan"),("⛽","Monitoring"),("📋","Daily Plan")]
@@ -716,7 +523,8 @@ def render_sidebar():
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True): logout(); st.rerun()
         
-        st.markdown('<div style="text-align:center;color:#8b949e;font-size:0.75rem;margin-top:1rem;">⛏️ Semen Padang v3.0</div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align:center;color:#8b949e;font-size:0.75rem;margin-top:1rem;">⛏️ Semen Padang v3.1<br>OneDrive Edition</div>', unsafe_allow_html=True)
+
 
 # ================================================================
 # MAIN
