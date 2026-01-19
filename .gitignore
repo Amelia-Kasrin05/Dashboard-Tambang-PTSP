@@ -1,18 +1,26 @@
-# Excel temporary / lock files
-~$*.xlsx
-~$*.xls
-
-
-# Virtual environment
-venv/
-
-# Python cache
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.env
 
-# OS junk
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files
+data/*.xlsx
+*.xlsx
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Env
-.env
+# Streamlit
+.streamlit/secrets.toml

@@ -1,5 +1,5 @@
 # ============================================================
-# ONEDRIVE CONFIG - WINDOWS PATH FIXED
+# ONEDRIVE CONFIG - Windows Path & File Configuration
 # ============================================================
 
 import os
@@ -20,14 +20,13 @@ ONEDRIVE_LINKS = {
 }
 
 # ============================================================
-# PATH LOKAL - AUTOMATIC DETECTION WITH PROPER PATH HANDLING
+# PATH LOKAL - AUTOMATIC DETECTION
 # ============================================================
 
 def get_onedrive_path():
     """Auto-detect OneDrive folder path"""
     username = os.getenv('USERNAME') or os.getenv('USER') or 'user'
     
-    # Common OneDrive paths - using os.path.join for cross-platform compatibility
     base_paths = [
         os.path.join('C:', 'Users', username, 'OneDrive', 'Dashboard_Tambang'),
         os.path.join('C:', 'Users', username, 'OneDrive - Personal', 'Dashboard_Tambang'),
@@ -38,7 +37,6 @@ def get_onedrive_path():
     
     for path in base_paths:
         if os.path.exists(path):
-            # Normalize path (convert to forward slashes for consistency)
             normalized = os.path.normpath(path)
             print(f"✅ Found OneDrive folder: {normalized}")
             return normalized
@@ -49,7 +47,7 @@ def get_onedrive_path():
 ONEDRIVE_FOLDER = get_onedrive_path()
 
 # ============================================================
-# FILE PATHS - WITH PROPER OS PATH HANDLING
+# FILE PATHS
 # ============================================================
 
 LOCAL_FILE_NAMES = {
@@ -82,7 +80,7 @@ LOCAL_FILE_NAMES = {
 def print_config_info():
     """Print configuration info for debugging"""
     print("=" * 60)
-    print("📁 ONEDRIVE CONFIG INFO")
+    print("🔍 ONEDRIVE CONFIG INFO")
     print("=" * 60)
     print(f"OneDrive Folder: {ONEDRIVE_FOLDER}")
     print(f"Folder exists: {os.path.exists(ONEDRIVE_FOLDER)}")
@@ -95,6 +93,3 @@ def print_config_info():
             print(f"  {exists} {path}")
         print()
     print("=" * 60)
-
-# Run debug on import (optional - comment out in production)
-# print_config_info()

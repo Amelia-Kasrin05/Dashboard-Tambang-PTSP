@@ -12,14 +12,16 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# Import from config
 try:
-    from onedrive_config import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
+    from config import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
 except ImportError:
-    ONEDRIVE_LINKS = {}
-    CACHE_TTL = 300
-    LOCAL_FILE_NAMES = {}
+    try:
+        from config.onedrive import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
+    except ImportError:
+        ONEDRIVE_LINKS = {}
+        CACHE_TTL = 300
+        LOCAL_FILE_NAMES = {}
 
 
 # ============================================================
