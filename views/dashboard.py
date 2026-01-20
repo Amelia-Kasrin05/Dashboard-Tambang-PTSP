@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 from config import MINING_COLORS, CHART_SEQUENCE
-from utils import load_produksi, load_bbm, load_gangguan, load_daily_plan
+from utils import load_produksi, load_bbm, load_gangguan, load_gangguan_all, load_daily_plan, get_gangguan_summary
 from utils.helpers import get_chart_layout
 
 
@@ -29,15 +29,19 @@ def show_dashboard():
     # Load Data
     df_prod = load_produksi()
     df_bbm = load_bbm()
-    df_gangguan = load_gangguan("Januari")
+    df_gangguan = load_gangguan_all()  # Load data gangguan lengkap
     df_daily = load_daily_plan()
+    
+    # Get gangguan summary
+    gangguan_summary = get_gangguan_summary(df_gangguan)
     
     # ===== KPI CARDS =====
     total_rit = df_prod['Rit'].sum() if not df_prod.empty else 0
     total_ton = df_prod['Tonnase'].sum() if not df_prod.empty else 0
     total_exc = df_prod['Excavator'].nunique() if not df_prod.empty else 0
     total_bbm = df_bbm['Total'].sum() if not df_bbm.empty else 0
-    total_gangguan = len(df_gangguan) if not df_gangguan.empty else 0
+    total_gangguan = gangguan_summary['total_incidents']
+    total_downtime = gangguan_summary['total_downtime']
     
     st.markdown(f"""
     <div class="kpi-grid">
@@ -59,17 +63,17 @@ def show_dashboard():
             <div class="kpi-value">{total_exc}</div>
             <div class="kpi-subtitle">excavators</div>
         </div>
-        <div class="kpi-card" style="--card-accent: #f59e0b;">
-            <div class="kpi-icon">⛽</div>
-            <div class="kpi-label">Fuel Usage</div>
-            <div class="kpi-value">{total_bbm:,.0f}</div>
-            <div class="kpi-subtitle">liters consumed</div>
-        </div>
         <div class="kpi-card" style="--card-accent: #ef4444;">
             <div class="kpi-icon">🚨</div>
             <div class="kpi-label">Incidents</div>
-            <div class="kpi-value">{total_gangguan}</div>
-            <div class="kpi-subtitle">reported issues</div>
+            <div class="kpi-value">{total_gangguan:,}</div>
+            <div class="kpi-subtitle">total kejadian</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #f59e0b;">
+            <div class="kpi-icon">⏱️</div>
+            <div class="kpi-label">Downtime</div>
+            <div class="kpi-value">{total_downtime:,.0f}</div>
+            <div class="kpi-subtitle">jam</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -179,19 +183,25 @@ def show_dashboard():
     with c3:
         st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🚨 Top Issues</span></div></div>', unsafe_allow_html=True)
         if not df_gangguan.empty:
-            dg = df_gangguan.head(5)
-            fig = px.bar(dg, x='Frekuensi', y='Row Labels', orientation='h', color_discrete_sequence=[MINING_COLORS['red']])
+            # Aggregate top gangguan dari data lengkap
+            dg = df_gangguan.groupby('Gangguan').size().reset_index(name='Frekuensi')
+            dg = dg.sort_values('Frekuensi', ascending=False).head(5)
+            dg = dg.sort_values('Frekuensi', ascending=True)  # For horizontal bar
+            
+            fig = px.bar(dg, x='Frekuensi', y='Gangguan', orientation='h', 
+                        color_discrete_sequence=[MINING_COLORS['red']])
             fig.update_layout(**get_chart_layout(height=220, show_legend=False))
-            fig.update_yaxes(categoryorder='total ascending')
+            fig.update_traces(hovertemplate='<b>%{y}</b><br>Frekuensi: %{x:,}<extra></extra>')
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
             st.info("No data")
     
     with c4:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">⛽ Fuel by Type</span></div></div>', unsafe_allow_html=True)
-        if not df_bbm.empty:
-            bbm = df_bbm.groupby('Alat Berat')['Total'].sum().reset_index().head(5)
-            fig = px.pie(bbm, values='Total', names='Alat Berat', hole=0.6, color_discrete_sequence=CHART_SEQUENCE)
+        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📂 Kelompok Masalah</span></div></div>', unsafe_allow_html=True)
+        if not df_gangguan.empty:
+            kelompok = df_gangguan.groupby('Kelompok Masalah').size().reset_index(name='Frekuensi')
+            fig = px.pie(kelompok, values='Frekuensi', names='Kelompok Masalah', hole=0.6, 
+                        color_discrete_sequence=['#ef4444', '#f59e0b', '#3b82f6', '#10b981'])
             fig.update_layout(**get_chart_layout(height=220, show_legend=False))
             fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})

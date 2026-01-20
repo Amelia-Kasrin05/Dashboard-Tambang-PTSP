@@ -290,7 +290,7 @@ def load_produksi():
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan(bulan):
-    """Load data gangguan per bulan"""
+    """Load data gangguan per bulan (ringkasan)"""
     sheet = f'Monitoring {bulan}'
     df = None
     
@@ -327,6 +327,116 @@ def load_gangguan(bulan):
         return df
     except:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_gangguan_all():
+    """
+    Load data gangguan lengkap dari sheet 'All'
+    Returns: DataFrame dengan semua data gangguan
+    """
+    df = None
+    
+    # Try OneDrive first
+    if ONEDRIVE_LINKS.get("gangguan"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='All')
+            except:
+                pass
+    
+    # Fallback to local
+    if df is None:
+        local_path = load_from_local("gangguan")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='All')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        # Filter out header rows
+        df = df[df['Bulan'] != 'Bulan'].copy()
+        
+        # Convert data types
+        df['Bulan'] = pd.to_numeric(df['Bulan'], errors='coerce')
+        df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce')
+        df['Durasi'] = pd.to_numeric(df['Durasi'], errors='coerce')
+        df['Tahun'] = pd.to_numeric(df['Tahun'], errors='coerce')
+        
+        # Parse Tanggal
+        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+        
+        # Remove rows with invalid data
+        df = df[df['Bulan'].notna()]
+        df = df[df['Durasi'].notna()]
+        
+        # Standardize Kelompok Masalah (fix case inconsistencies)
+        kelompok_map = {
+            'Delay Operational CC': 'Delay Operational CC',
+            'Delay operational CC': 'Delay Operational CC',
+            'delay Operational CC': 'Delay Operational CC',
+            'Delay Operational DBLH': 'Delay Operational DBLH',
+            'Downtime Belt Conveyor': 'Downtime Belt Conveyor',
+            'Downtime belt conveyor': 'Downtime Belt Conveyor',
+            'Downtime Crusher': 'Downtime Crusher',
+        }
+        df['Kelompok Masalah'] = df['Kelompok Masalah'].replace(kelompok_map)
+        
+        # Filter valid Kelompok Masalah
+        valid_kelompok = [
+            'Delay Operational CC', 
+            'Delay Operational DBLH', 
+            'Downtime Belt Conveyor', 
+            'Downtime Crusher'
+        ]
+        df = df[df['Kelompok Masalah'].isin(valid_kelompok)]
+        
+        # Map bulan number to name
+        bulan_names = {
+            1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April',
+            5: 'Mei', 6: 'Juni', 7: 'Juli', 8: 'Agustus',
+            9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+        }
+        df['Bulan_Name'] = df['Bulan'].map(bulan_names)
+        
+        # Reset index
+        df = df.reset_index(drop=True)
+        
+        return df
+        
+    except Exception as e:
+        print(f"Error loading gangguan: {e}")
+        return pd.DataFrame()
+
+
+def get_gangguan_summary(df):
+    """
+    Generate summary statistics dari data gangguan
+    Returns: dict dengan KPI metrics
+    """
+    if df.empty:
+        return {
+            'total_incidents': 0,
+            'total_downtime': 0,
+            'mttr': 0,
+            'total_alat': 0,
+            'top_gangguan': '-',
+            'top_alat': '-'
+        }
+    
+    return {
+        'total_incidents': len(df),
+        'total_downtime': df['Durasi'].sum(),
+        'mttr': df['Durasi'].mean(),
+        'total_alat': df['Alat'].nunique(),
+        'top_gangguan': df['Gangguan'].value_counts().index[0] if len(df) > 0 else '-',
+        'top_alat': df['Alat'].value_counts().index[0] if len(df) > 0 else '-'
+    }
 
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -568,3 +678,395 @@ def load_realisasi():
         return df
     except:
         return pd.DataFrame()
+
+# ============================================================
+# NEW MONITORING FUNCTIONS (ADDED)
+# ============================================================
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_bbm_enhanced():
+    """Load data BBM dengan kategori alat"""
+    df = load_bbm()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        # Add kategori alat
+        df['Kategori'] = df['Alat Berat'].apply(lambda x: 
+            'Excavator' if 'Excavator' in str(x) else 
+            'Dump Truck' if 'Dump' in str(x) or 'SCANIA' in str(x).upper() else 
+            'Support'
+        )
+        return df
+    except:
+        return df
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_bbm_detail():
+    """Load BBM dengan detail per hari (melted format)"""
+    df = load_bbm_enhanced()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        day_cols = [col for col in df.columns if str(col).isdigit()]
+        if not day_cols:
+            return pd.DataFrame()
+        
+        id_vars = ['No', 'Alat Berat', 'Tipe Alat']
+        if 'Kategori' in df.columns:
+            id_vars.append('Kategori')
+        
+        df_melted = df.melt(
+            id_vars=id_vars,
+            value_vars=day_cols,
+            var_name='Tanggal',
+            value_name='BBM_Liter'
+        )
+        
+        df_melted['Tanggal'] = pd.to_numeric(df_melted['Tanggal'], errors='coerce')
+        df_melted['BBM_Liter'] = pd.to_numeric(df_melted['BBM_Liter'], errors='coerce').fillna(0)
+        df_melted = df_melted[df_melted['BBM_Liter'] > 0]
+        
+        return df_melted
+    except:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_ritase_enhanced():
+    """Load data ritase dengan Total_Ritase dan Bulan"""
+    df = load_ritase()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce').fillna(1).astype(int)
+        
+        front_cols = ['Front B LS', 'Front B Clay', 'Front B LS MIX', 
+                     'Front C LS', 'Front C LS MIX', 'PLB LS', 'PLB SS', 
+                     'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
+                     'PLT LS MIX', 'Stockpile 6 ']
+        
+        available_fronts = [c for c in front_cols if c in df.columns]
+        df['Total_Ritase'] = df[available_fronts].sum(axis=1)
+        
+        if 'Tanggal' in df.columns:
+            df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+            df['Bulan'] = df['Tanggal'].dt.month
+            df['Bulan_Nama'] = df['Tanggal'].dt.strftime('%B')
+        
+        return df
+    except:
+        return df
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_ritase_by_front():
+    """Load ritase aggregated by front/location"""
+    df = load_ritase_enhanced()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        front_cols = ['Front B LS', 'Front B Clay', 'Front B LS MIX', 
+                      'Front C LS', 'Front C LS MIX', 'PLB LS', 'PLB SS', 
+                      'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
+                      'PLT LS MIX', 'Stockpile 6 ']
+        
+        available = [c for c in front_cols if c in df.columns]
+        totals = df[available].sum().reset_index()
+        totals.columns = ['Front', 'Total_Ritase']
+        totals = totals[totals['Total_Ritase'] > 0]
+        totals = totals.sort_values('Total_Ritase', ascending=False)
+        
+        return totals
+    except:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_tonase():
+    """Load data tonase per jam"""
+    df = None
+    
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='Tonase', header=1)
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Tonase', header=1)
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        df = df.rename(columns={df.columns[0]: 'Tanggal', df.columns[1]: 'Ritase'})
+        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+        df = df[df['Tanggal'].notna()]
+        
+        hour_cols = [col for col in df.columns if '-' in str(col) and col not in ['Tanggal', 'Ritase']]
+        for col in hour_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        if 'Total' in df.columns:
+            df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
+        
+        df['Bulan'] = df['Tanggal'].dt.month
+        df = df.reset_index(drop=True)
+        return df
+    except:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_tonase_hourly():
+    """Load tonase in hourly format (melted)"""
+    df = load_tonase()
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        hour_cols = [col for col in df.columns if '-' in str(col) and col not in ['Tanggal', 'Ritase', 'Total']]
+        if not hour_cols:
+            return pd.DataFrame()
+        
+        df_melted = df.melt(
+            id_vars=['Tanggal', 'Bulan'],
+            value_vars=hour_cols,
+            var_name='Jam',
+            value_name='Tonase'
+        )
+        df_melted['Tonase'] = pd.to_numeric(df_melted['Tonase'], errors='coerce').fillna(0)
+        return df_melted
+    except:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_analisa_produksi_all():
+    """Load semua data analisa produksi (Jan-Des)"""
+    bulan_map = {
+        'Januari': 0, 'Februari': 5, 'Maret': 10, 'April': 15,
+        'Mei': 20, 'Juni': 25, 'Juli': 30, 'Agustus': 35,
+        'September': 40, 'Oktober': 45, 'November': 50, 'Desember': 55
+    }
+    
+    df = None
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='Analisa Produksi')
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Analisa Produksi')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    all_data = []
+    for bulan, start_col in bulan_map.items():
+        try:
+            df_bulan = df.iloc[1:32, start_col:start_col+4].copy()
+            df_bulan.columns = ['Tanggal', 'Plan', 'Aktual', 'Ketercapaian']
+            df_bulan['Tanggal'] = pd.to_numeric(df_bulan['Tanggal'], errors='coerce')
+            df_bulan['Plan'] = pd.to_numeric(df_bulan['Plan'], errors='coerce')
+            df_bulan['Aktual'] = pd.to_numeric(df_bulan['Aktual'], errors='coerce')
+            df_bulan['Ketercapaian'] = pd.to_numeric(df_bulan['Ketercapaian'], errors='coerce')
+            df_bulan = df_bulan.dropna(subset=['Tanggal'])
+            if not df_bulan.empty:
+                df_bulan['Bulan'] = bulan
+                all_data.append(df_bulan)
+        except:
+            continue
+    
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_pengiriman():
+    """Load data tonase pengiriman LS & SS"""
+    df = None
+    
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='TONASE Pengiriman ')
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='TONASE Pengiriman ')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        all_data = []
+        bulan_sections = {
+            'Juni': (1, 7), 'Juli': (8, 16), 'Agustus': (21, 29),
+            'September': (30, 38), 'Oktober': (39, 47), 
+            'November': (48, 56), 'Desember': (57, 64)
+        }
+        
+        for bulan, (start, end) in bulan_sections.items():
+            try:
+                section = df.iloc[2:, start:end].copy()
+                if section.shape[1] >= 6:
+                    section.columns = ['Tanggal', 'Shift', 'AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS'][:section.shape[1]]
+                    section['Bulan'] = bulan
+                    section = section[section['Tanggal'].notna()]
+                    all_data.append(section)
+            except:
+                continue
+        
+        if all_data:
+            result = pd.concat(all_data, ignore_index=True)
+            for col in ['Shift', 'AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS']:
+                if col in result.columns:
+                    result[col] = pd.to_numeric(result[col], errors='coerce').fillna(0)
+            return result
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_gangguan_monitoring():
+    """Load gangguan dari sheet Gangguan di file Monitoring"""
+    df = None
+    
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name='Gangguan')
+            except:
+                pass
+    
+    if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name='Gangguan')
+            except:
+                pass
+    
+    if df is None:
+        return pd.DataFrame()
+    
+    try:
+        all_data = []
+        bulan_cols = ['Tanggal', 'Week', 'Shift', 'Start', 'End', 'Durasi', 'Kendala', 'Masalah']
+        
+        for i in range(12):
+            start_col = i * 9
+            try:
+                section = df.iloc[:, start_col:start_col+8].copy()
+                if section.shape[1] < 8:
+                    continue
+                section.columns = bulan_cols
+                section = section[section['Tanggal'].notna()]
+                section = section[section['Durasi'].notna()]
+                section['Tanggal'] = pd.to_datetime(section['Tanggal'], errors='coerce')
+                section['Durasi'] = pd.to_numeric(section['Durasi'], errors='coerce').fillna(0)
+                section['Shift'] = pd.to_numeric(section['Shift'], errors='coerce').fillna(1)
+                section = section[section['Tanggal'].notna()]
+                section = section[section['Durasi'] > 0]
+                if not section.empty:
+                    all_data.append(section)
+            except:
+                continue
+        
+        if all_data:
+            result = pd.concat(all_data, ignore_index=True)
+            result['Bulan'] = result['Tanggal'].dt.month
+            return result
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+
+# ============================================================
+# SUMMARY FUNCTIONS FOR MONITORING
+# ============================================================
+
+def get_bbm_summary(df_bbm):
+    """Calculate BBM summary statistics"""
+    if df_bbm is None or df_bbm.empty:
+        return {'total_bbm': 0, 'avg_per_unit': 0, 'excavator_total': 0, 'dt_total': 0}
+    
+    total_bbm = df_bbm['Total'].sum() if 'Total' in df_bbm.columns else 0
+    avg_per_unit = df_bbm['Total'].mean() if 'Total' in df_bbm.columns else 0
+    
+    excavator_total = dt_total = 0
+    if 'Kategori' in df_bbm.columns:
+        excavator_total = df_bbm[df_bbm['Kategori'] == 'Excavator']['Total'].sum()
+        dt_total = df_bbm[df_bbm['Kategori'] == 'Dump Truck']['Total'].sum()
+    
+    return {'total_bbm': total_bbm, 'avg_per_unit': round(avg_per_unit, 0), 
+            'excavator_total': excavator_total, 'dt_total': dt_total}
+
+
+def get_ritase_summary(df_ritase):
+    """Calculate ritase summary statistics"""
+    if df_ritase is None or df_ritase.empty:
+        return {'total_ritase': 0, 'avg_per_shift': 0, 'avg_per_day': 0}
+    
+    total_ritase = df_ritase['Total_Ritase'].sum() if 'Total_Ritase' in df_ritase.columns else 0
+    avg_per_shift = df_ritase['Total_Ritase'].mean() if 'Total_Ritase' in df_ritase.columns else 0
+    
+    avg_per_day = 0
+    if 'Tanggal' in df_ritase.columns and 'Total_Ritase' in df_ritase.columns:
+        daily = df_ritase.groupby('Tanggal')['Total_Ritase'].sum()
+        avg_per_day = daily.mean() if len(daily) > 0 else 0
+    
+    return {'total_ritase': total_ritase, 'avg_per_shift': round(avg_per_shift, 0), 
+            'avg_per_day': round(avg_per_day, 0)}
+
+
+def get_production_summary(df_prod):
+    """Calculate production achievement summary"""
+    if df_prod is None or df_prod.empty:
+        return {'total_plan': 0, 'total_aktual': 0, 'achievement_pct': 0, 'days_achieved': 0}
+    
+    total_plan = df_prod['Plan'].sum() if 'Plan' in df_prod.columns else 0
+    total_aktual = df_prod['Aktual'].sum() if 'Aktual' in df_prod.columns else 0
+    achievement_pct = (total_aktual / total_plan * 100) if total_plan > 0 else 0
+    
+    days_achieved = 0
+    if 'Ketercapaian' in df_prod.columns:
+        days_achieved = len(df_prod[df_prod['Ketercapaian'] >= 1.0])
+    
+    return {'total_plan': total_plan, 'total_aktual': total_aktual,
+            'achievement_pct': round(achievement_pct, 1), 'days_achieved': days_achieved}

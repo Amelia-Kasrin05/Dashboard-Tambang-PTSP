@@ -7,7 +7,7 @@ import os
 # ============================================================
 # CACHE SETTINGS
 # ============================================================
-CACHE_TTL = 30  # 30 detik
+CACHE_TTL = 30  # 30 detik - data refresh setiap 30 detik
 
 # ============================================================
 # ONEDRIVE LINKS (Kosongkan jika menggunakan file lokal)
@@ -27,12 +27,26 @@ def get_onedrive_path():
     """Auto-detect OneDrive folder path"""
     username = os.getenv('USERNAME') or os.getenv('USER') or 'user'
     
+    # Daftar kemungkinan path OneDrive
     base_paths = [
-        os.path.join('C:', 'Users', username, 'OneDrive', 'Dashboard_Tambang'),
-        os.path.join('C:', 'Users', username, 'OneDrive - Personal', 'Dashboard_Tambang'),
-        os.path.join('C:', 'Users', username, 'OneDrive', 'AMELIA - Personal', 'Dashboard_Tambang'),
-        os.path.join('C:', 'Users', 'user', 'OneDrive', 'Dashboard_Tambang'),
-        os.path.join('D:', 'OneDrive', 'Dashboard_Tambang'),
+        # Path standar
+        os.path.join('C:\\Users', username, 'OneDrive', 'Dashboard_Tambang'),
+        os.path.join('C:\\Users', username, 'OneDrive - Personal', 'Dashboard_Tambang'),
+        
+        # Path AMELIA - Personal (sesuai screenshot Anda)
+        os.path.join('C:\\Users', username, 'OneDrive - AMELIA - Personal', 'Dashboard_Tambang'),
+        os.path.join('C:\\Users', username, 'OneDrive', 'AMELIA - Personal', 'Dashboard_Tambang'),
+        
+        # Path dengan user 'user'
+        os.path.join('C:\\Users', 'user', 'OneDrive', 'Dashboard_Tambang'),
+        os.path.join('C:\\Users', 'user', 'OneDrive - Personal', 'Dashboard_Tambang'),
+        os.path.join('C:\\Users', 'user', 'OneDrive', 'AMELIA - Personal', 'Dashboard_Tambang'),
+        
+        # Path alternatif
+        os.path.join('D:\\OneDrive', 'Dashboard_Tambang'),
+        
+        # Relative path
+        'data',
     ]
     
     for path in base_paths:
@@ -41,7 +55,7 @@ def get_onedrive_path():
             print(f"✅ Found OneDrive folder: {normalized}")
             return normalized
     
-    print("⚠️ OneDrive folder not found, using relative path")
+    print("⚠️ OneDrive folder not found, using relative path 'data'")
     return "data"
 
 ONEDRIVE_FOLDER = get_onedrive_path()
@@ -93,3 +107,6 @@ def print_config_info():
             print(f"  {exists} {path}")
         print()
     print("=" * 60)
+
+# Uncomment untuk debug
+# print_config_info()
