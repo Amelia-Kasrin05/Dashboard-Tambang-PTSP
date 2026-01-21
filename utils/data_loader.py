@@ -147,6 +147,42 @@ def safe_parse_date_column(date_series):
     return date_series.apply(parse_excel_date)
 
 
+def normalize_excavator_name(name):
+    """
+    Normalize excavator name to format: PC XXX-YY
+    Example: 'PC 850 01' -> 'PC 850-01', 'PC850-01' -> 'PC 850-01', 'PC-400-05' -> 'PC 400-05'
+    """
+    import re
+    
+    if pd.isna(name) or not isinstance(name, str):
+        return name
+    
+    name = str(name).strip().upper()
+    
+    # Remove all separators first to get pure digits
+    # Handle formats: PC 850 01, PC850-01, PC 850-01, PC85001, PC-850-01, PC-400-05
+    clean = re.sub(r'[^A-Z0-9]', '', name)  # Remove all non-alphanumeric
+    
+    # Match PC followed by exactly 5 digits (3 for model + 2 for number)
+    match = re.match(r'^PC(\d{3})(\d{2})$', clean)
+    if match:
+        return f"PC {match.group(1)}-{match.group(2)}"
+    
+    # Try original pattern for edge cases
+    match = re.match(r'^PC[-\s]*(\d{3})[-\s]*(\d{2})$', name)
+    if match:
+        return f"PC {match.group(1)}-{match.group(2)}"
+    
+    return name
+
+
+def normalize_excavator_column(df):
+    """Apply excavator name normalization to dataframe"""
+    if 'Excavator' in df.columns:
+        df['Excavator'] = df['Excavator'].apply(normalize_excavator_name)
+    return df
+
+
 # ============================================================
 # LOAD PRODUKSI - FIXED VERSION
 # ============================================================
@@ -257,6 +293,9 @@ def load_produksi():
         
         # Filter only valid excavators (PC prefix)
         df = df[df['Excavator'].astype(str).str.startswith('PC', na=False)]
+        
+        # Normalize excavator names to consistent format (PC XXX-YY)
+        df = normalize_excavator_column(df)
         
         # Convert numeric columns
         df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce').fillna(0)
@@ -961,6 +1000,56 @@ def load_pengiriman():
         return pd.DataFrame()
 
 
+def parse_durasi_value(value):
+    """
+    Parse Durasi column - handle various formats safely.
+    Durasi can be: numeric hours, timedelta, datetime, or time string.
+    Returns hours as float, capped at reasonable max (24 hours).
+    """
+    MAX_DURASI_HOURS = 24  # Maximum reasonable downtime per incident
+    
+    if pd.isna(value):
+        return 0.0
+    
+    try:
+        # If already numeric (float/int)
+        if isinstance(value, (int, float)):
+            hours = float(value)
+            # Check if it looks like an Excel serial time (0-1 range = fraction of day)
+            if 0 < hours < 1:
+                hours = hours * 24  # Convert fraction of day to hours
+            # Cap at max reasonable value
+            return min(abs(hours), MAX_DURASI_HOURS)
+        
+        # If it's a timedelta
+        if isinstance(value, pd.Timedelta):
+            hours = value.total_seconds() / 3600
+            return min(abs(hours), MAX_DURASI_HOURS)
+        
+        # If it's a datetime/time (interpret as duration from midnight)
+        if isinstance(value, (datetime, pd.Timestamp)):
+            # Extract hours and minutes as duration
+            hours = value.hour + value.minute / 60
+            return min(hours, MAX_DURASI_HOURS)
+        
+        # If it's a string like "2:30" or "02:30:00"
+        if isinstance(value, str):
+            value = value.strip()
+            if ':' in value:
+                parts = value.split(':')
+                hours = int(parts[0]) + int(parts[1]) / 60
+                return min(hours, MAX_DURASI_HOURS)
+            # Try parsing as float
+            hours = float(value)
+            if 0 < hours < 1:
+                hours = hours * 24
+            return min(abs(hours), MAX_DURASI_HOURS)
+        
+        return 0.0
+    except:
+        return 0.0
+
+
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan_monitoring():
     """Load gangguan dari sheet Gangguan di file Monitoring"""
@@ -999,7 +1088,10 @@ def load_gangguan_monitoring():
                 section = section[section['Tanggal'].notna()]
                 section = section[section['Durasi'].notna()]
                 section['Tanggal'] = pd.to_datetime(section['Tanggal'], errors='coerce')
-                section['Durasi'] = pd.to_numeric(section['Durasi'], errors='coerce').fillna(0)
+                
+                # FIX: Use safe Durasi parser to prevent overflow
+                section['Durasi'] = section['Durasi'].apply(parse_durasi_value)
+                
                 section['Shift'] = pd.to_numeric(section['Shift'], errors='coerce').fillna(1)
                 section = section[section['Tanggal'].notna()]
                 section = section[section['Durasi'] > 0]

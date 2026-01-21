@@ -3,18 +3,20 @@
 # ============================================================
 
 import streamlit as st
-from config import USERS
+from config import USERS, verify_password
 from utils.helpers import get_logo_base64
 
 
 def login(username, password):
-    """Authenticate user"""
-    if username in USERS and USERS[username]['password'] == password:
-        st.session_state.logged_in = True
-        st.session_state.username = username
-        st.session_state.role = USERS[username]['role']
-        st.session_state.name = USERS[username]['name']
-        return True
+    """Authenticate user with hashed password"""
+    if username in USERS:
+        user = USERS[username]
+        if verify_password(password, user.get('password_hash', '')):
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.session_state.role = user['role']
+            st.session_state.name = user['name']
+            return True
     return False
 
 

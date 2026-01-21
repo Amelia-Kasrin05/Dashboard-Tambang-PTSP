@@ -8,7 +8,7 @@ import streamlit as st
 # Page Config (must be first Streamlit command)
 st.set_page_config(
     page_title="Mining Dashboard | Semen Padang",
-    page_icon="⛏️",
+    page_icon="assets/logo_semen_padang.jpg",
     layout="wide",
     initial_sidebar_state="expanded"
 )
