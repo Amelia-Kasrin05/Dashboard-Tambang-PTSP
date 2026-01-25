@@ -1,405 +1,497 @@
 # ============================================================
-# MONITORING - BBM & Ritase Monitoring Page (COMPLETE)
+# MONITORING - Operational Intelligence Dashboard V4.0
 # ============================================================
+# SIMPLIFIED VERSION - Direct Excel reading with defensive coding
 
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime
+import io
+import os
 
-# Import colors
+# Import colors and helpers
 try:
-    from config import MINING_COLORS, CHART_SEQUENCE
-except ImportError:
-    MINING_COLORS = {
-        'gold': '#d4a84b', 'blue': '#3b82f6', 'green': '#10b981',
-        'red': '#ef4444', 'orange': '#f59e0b', 'purple': '#8b5cf6',
-        'cyan': '#06b6d4', 'slate': '#64748b'
-    }
-    CHART_SEQUENCE = ['#d4a84b', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ef4444', '#ec4899']
-
-# Import data loaders
-try:
-    from utils import (
-        load_bbm_enhanced, load_bbm_detail, load_ritase_enhanced, load_ritase_by_front,
-        load_tonase, load_tonase_hourly, load_analisa_produksi, load_analisa_produksi_all,
-        load_gangguan_monitoring, get_bbm_summary, get_ritase_summary, get_production_summary
-    )
-except ImportError:
-    from utils.data_loader import (
-        load_bbm_enhanced, load_bbm_detail, load_ritase_enhanced, load_ritase_by_front,
-        load_tonase, load_tonase_hourly, load_analisa_produksi, load_analisa_produksi_all,
-        load_gangguan_monitoring, get_bbm_summary, get_ritase_summary, get_production_summary
-    )
-
-try:
+    from config import MINING_COLORS
     from utils.helpers import get_chart_layout
 except ImportError:
-    def get_chart_layout(height=350, show_legend=True):
-        return dict(
-            template='plotly_dark',
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            height=height,
-            margin=dict(l=20, r=20, t=40, b=40),
-            font=dict(family='Inter', color='#94a3b8'),
-            xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor='#1e3a5f'),
-            yaxis=dict(showgrid=True, gridcolor='rgba(30,58,95,0.5)', zeroline=False),
-            legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5) if show_legend else dict(visible=False),
-            hoverlabel=dict(bgcolor='#122a46', font_size=12)
-        )
+    MINING_COLORS = {'gold': '#d4a84b', 'blue': '#3b82f6', 'green': '#10b981', 'red': '#ef4444'}
+    def get_chart_layout(height=350):
+        return {'height': height, 'template': 'plotly_dark', 'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)'}
 
+# File path
+MONITORING_FILE = r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring_2025_.xlsx"
+
+# ============================================================
+# SIMPLE DATA LOADERS (Direct Excel Access)
+# ============================================================
+
+@st.cache_data(ttl=60)
+def load_bbm_data():
+    """Load BBM sheet - simple and direct"""
+    try:
+        if not os.path.exists(MONITORING_FILE):
+            return pd.DataFrame()
+        df = pd.read_excel(MONITORING_FILE, sheet_name='BBM')
+        # Expected columns: No, Alat Berat, Tipe Alat, 1-31, Total
+        return df
+    except Exception as e:
+        st.error(f"Error loading BBM: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_ritase_data():
+    """Load Ritase sheet - simple and direct"""
+    try:
+        if not os.path.exists(MONITORING_FILE):
+            return pd.DataFrame()
+        df = pd.read_excel(MONITORING_FILE, sheet_name='Ritase')
+        # Expected columns: Tanggal, Shift, Pengawasan, + Location columns
+        return df
+    except Exception as e:
+        st.error(f"Error loading Ritase: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_analisa_produksi():
+    """Load Analisa Produksi sheet"""
+    try:
+        if not os.path.exists(MONITORING_FILE):
+            return pd.DataFrame()
+        df = pd.read_excel(MONITORING_FILE, sheet_name='Analisa Produksi')
+        return df
+    except Exception as e:
+        st.error(f"Error loading Analisa Produksi: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_gangguan_data():
+    """Load Gangguan sheet"""
+    try:
+        if not os.path.exists(MONITORING_FILE):
+            return pd.DataFrame()
+        df = pd.read_excel(MONITORING_FILE, sheet_name='Gangguan')
+        return df
+    except Exception as e:
+        st.error(f"Error loading Gangguan: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_tonase_data():
+    """Load Tonase sheet"""
+    try:
+        if not os.path.exists(MONITORING_FILE):
+            return pd.DataFrame()
+        df = pd.read_excel(MONITORING_FILE, sheet_name='Tonase', header=1)
+        return df
+    except Exception as e:
+        st.error(f"Error loading Tonase: {e}")
+        return pd.DataFrame()
+
+
+# ============================================================
+# MAIN DASHBOARD
+# ============================================================
 
 def show_monitoring():
-    """Render monitoring page - BBM & Ritase"""
+    """Render Professional Monitoring Dashboard V4.0"""
     
-    # Page Header
+    # 1. Header
     st.markdown("""
     <div class="page-header">
-        <div class="page-header-icon">⛽</div>
+        <div class="page-header-icon">📡</div>
         <div class="page-header-text">
-            <h1>Monitoring BBM & Ritase</h1>
-            <p>Fuel consumption and trip monitoring • Last updated: """ + datetime.now().strftime("%d %b %Y, %H:%M") + """</p>
+            <h1>Operational Intelligence</h1>
+            <p>Smart Monitoring: Fuel, Supply Chain & Planning Adherence</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Load Data
-    df_bbm = load_bbm_enhanced()
-    df_ritase = load_ritase_enhanced()
-    df_tonase = load_tonase()
-    df_produksi = load_analisa_produksi_all()
-    df_gangguan = load_gangguan_monitoring()
+    # 2. Load Data
+    df_bbm = load_bbm_data()
+    df_rit = load_ritase_data()
+    df_prod = load_analisa_produksi()
+    df_gang = load_gangguan_data()
+    df_ton = load_tonase_data()
     
-    # Filters
-    with st.container():
-        col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
+    # 3. Filters
+    st.markdown('<div class="chart-container" style="padding:15px; margin-bottom:20px;">', unsafe_allow_html=True)
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    with col_f1:
+        bulan_opts = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
+                      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+        selected_month = st.selectbox("📅 Periode Bulan", bulan_opts, index=0, key='mon_bulan_v4')
         
-        with col_f1:
-            bulan_options = ['Semua', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-                           'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
-            selected_bulan = st.selectbox("📅 Bulan", bulan_options, index=0)
+    with col_f2:
+        selected_shift = st.selectbox("⏰ Shift", ['Semua', '1', '2', '3'], key='mon_shift_v4')
         
-        with col_f2:
-            shift_options = ['Semua', '1', '2', '3']
-            selected_shift = st.selectbox("⏰ Shift", shift_options, index=0)
-        
-        with col_f3:
-            kategori_options = ['Semua']
-            if not df_bbm.empty and 'Kategori' in df_bbm.columns:
-                kategori_options += df_bbm['Kategori'].unique().tolist()
-            selected_kategori = st.selectbox("🚜 Tipe Alat", kategori_options, index=0)
-        
-        with col_f4:
-            if st.button("🔄 Refresh", use_container_width=True):
-                st.cache_data.clear()
-                st.rerun()
+    with col_f3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # Apply filters
-    df_ritase_filtered = df_ritase.copy() if not df_ritase.empty else pd.DataFrame()
-    if not df_ritase_filtered.empty:
-        if selected_bulan != 'Semua':
-            bulan_map = {'Januari': 1, 'Februari': 2, 'Maret': 3, 'April': 4, 'Mei': 5, 'Juni': 6,
-                        'Juli': 7, 'Agustus': 8, 'September': 9, 'Oktober': 10, 'November': 11, 'Desember': 12}
-            if 'Bulan' in df_ritase_filtered.columns:
-                df_ritase_filtered = df_ritase_filtered[df_ritase_filtered['Bulan'] == bulan_map.get(selected_bulan, 0)]
-        
-        if selected_shift != 'Semua':
-            df_ritase_filtered = df_ritase_filtered[df_ritase_filtered['Shift'] == int(selected_shift)]
+    # ============================================================
+    # KPI CALCULATIONS
+    # ============================================================
     
-    df_bbm_filtered = df_bbm.copy() if not df_bbm.empty else pd.DataFrame()
-    if not df_bbm_filtered.empty and selected_kategori != 'Semua':
-        df_bbm_filtered = df_bbm_filtered[df_bbm_filtered['Kategori'] == selected_kategori]
+    # BBM Total
+    total_bbm = 0
+    if not df_bbm.empty and 'Total' in df_bbm.columns:
+        try:
+            total_bbm = pd.to_numeric(df_bbm['Total'], errors='coerce').sum()
+        except:
+            pass
     
-    # Get summaries
-    bbm_summary = get_bbm_summary(df_bbm_filtered)
-    ritase_summary = get_ritase_summary(df_ritase_filtered)
-    prod_summary = get_production_summary(df_produksi)
+    # Ritase Total - Sum all location columns
+    total_rit = 0
+    if not df_rit.empty:
+        try:
+            # Location columns are everything except Tanggal, Shift, Pengawasan, and Unnamed columns
+            exclude = ['Tanggal', 'Shift', 'Pengawasan']
+            loc_cols = [c for c in df_rit.columns if c not in exclude and not str(c).startswith('Unnamed') and not str(c).startswith('Tanggal')]
+            for col in loc_cols:
+                total_rit += pd.to_numeric(df_rit[col], errors='coerce').sum()
+        except:
+            pass
     
-    # Calculate metrics
-    total_bbm = bbm_summary['total_bbm']
-    total_ritase = ritase_summary['total_ritase']
-    avg_ritase = ritase_summary['avg_per_shift']
-    total_tonase = df_tonase['Total'].sum() if not df_tonase.empty and 'Total' in df_tonase.columns else 1
-    fuel_eff = total_bbm / total_tonase if total_tonase > 0 else 0
-    achievement = prod_summary['achievement_pct']
-    total_downtime = df_gangguan['Durasi'].sum() if not df_gangguan.empty and 'Durasi' in df_gangguan.columns else 0
+    # Plan Adherence from Analisa Produksi (Januari block)
+    plan_adherence = 0
+    total_plan = 0
+    total_aktual = 0
+    if not df_prod.empty:
+        try:
+            # Structure: Row 0 has headers (Tanggal, Plan, Aktual, Ketercapaian)
+            # Actual data starts row 1
+            # For Januari, columns 0-3; Februari columns 5-8
+            month_idx = bulan_opts.index(selected_month)
+            start_col = month_idx * 5  # Approximate, adjust based on actual structure
+            
+            # Try to find Plan and Aktual columns
+            cols = df_prod.columns.tolist()
+            plan_col_idx = None
+            aktual_col_idx = None
+            
+            # Search for 'Plan' and 'Aktual' in row 0
+            for i, val in enumerate(df_prod.iloc[0]):
+                if str(val).strip().lower() == 'plan':
+                    plan_col_idx = i
+                elif str(val).strip().lower() in ['aktual', 'aktual']:
+                    aktual_col_idx = i
+                    
+            if plan_col_idx is not None and aktual_col_idx is not None:
+                plan_data = pd.to_numeric(df_prod.iloc[1:, plan_col_idx], errors='coerce')
+                aktual_data = pd.to_numeric(df_prod.iloc[1:, aktual_col_idx], errors='coerce')
+                total_plan = plan_data.sum()
+                total_aktual = aktual_data.sum()
+                plan_adherence = (total_aktual / total_plan * 100) if total_plan > 0 else 0
+        except Exception as e:
+            pass
     
-    # KPI Cards
+    # Gangguan Count - Count rows in first month block (columns 0-7)
+    total_gangguan = 0
+    total_downtime = 0
+    if not df_gang.empty:
+        try:
+            # Column 5 is 'Durasi' for Januari
+            if 'Durasi' in df_gang.columns:
+                total_downtime = pd.to_numeric(df_gang['Durasi'], errors='coerce').sum()
+                total_gangguan = df_gang['Durasi'].notna().sum()
+        except:
+            pass
+    
+    # Fuel Efficiency
+    fuel_eff = 0
+    if total_aktual > 0 and total_bbm > 0:
+        fuel_eff = total_bbm / total_aktual
+    
+    # ============================================================
+    # KPI DISPLAY
+    # ============================================================
+    
     st.markdown(f"""
     <div class="kpi-grid">
-        <div class="kpi-card" style="--card-accent: #ef4444;">
+        <div class="kpi-card" style="--card-accent: #3b82f6;">
+            <div class="kpi-icon">🎯</div>
+            <div class="kpi-label">Plan Adherence</div>
+            <div class="kpi-value">{plan_adherence:.1f}%</div>
+            <div class="kpi-subtitle">Aktual vs Plan</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #f59e0b;">
             <div class="kpi-icon">⛽</div>
             <div class="kpi-label">Total BBM</div>
             <div class="kpi-value">{total_bbm:,.0f}</div>
-            <div class="kpi-subtitle">liter</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: #3b82f6;">
-            <div class="kpi-icon">🚛</div>
-            <div class="kpi-label">Total Ritase</div>
-            <div class="kpi-value">{total_ritase:,.0f}</div>
-            <div class="kpi-subtitle">trips</div>
+            <div class="kpi-subtitle">Liter</div>
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
-            <div class="kpi-icon">📊</div>
-            <div class="kpi-label">Avg Ritase/Shift</div>
-            <div class="kpi-value">{avg_ritase:,.0f}</div>
-            <div class="kpi-subtitle">trips/shift</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: #f59e0b;">
-            <div class="kpi-icon">⚡</div>
-            <div class="kpi-label">Fuel Efficiency</div>
-            <div class="kpi-value">{fuel_eff:.2f}</div>
-            <div class="kpi-subtitle">L/ton</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: #d4a84b;">
-            <div class="kpi-icon">🎯</div>
-            <div class="kpi-label">Achievement</div>
-            <div class="kpi-value">{achievement:.1f}%</div>
-            <div class="kpi-subtitle">vs target</div>
+            <div class="kpi-icon">🏭</div>
+            <div class="kpi-label">Total Produksi</div>
+            <div class="kpi-value">{total_aktual:,.0f}</div>
+            <div class="kpi-subtitle">Ton</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
-            <div class="kpi-icon">⏱️</div>
-            <div class="kpi-label">Downtime</div>
-            <div class="kpi-value">{total_downtime:.1f}</div>
-            <div class="kpi-subtitle">jam</div>
+            <div class="kpi-icon">🚛</div>
+            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-value">{total_rit:,.0f}</div>
+            <div class="kpi-subtitle">Trips</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #ef4444;">
+            <div class="kpi-icon">🚨</div>
+            <div class="kpi-label">Gangguan</div>
+            <div class="kpi-value">{total_gangguan:,.0f}</div>
+            <div class="kpi-subtitle">{total_downtime:.1f} jam downtime</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #06b6d4;">
+            <div class="kpi-icon">📉</div>
+            <div class="kpi-label">Fuel Efficiency</div>
+            <div class="kpi-value">{fuel_eff:.2f}</div>
+            <div class="kpi-subtitle">L/Ton</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # BBM Analysis Section
+    # ============================================================
+    # SECTION 1: PRODUCTION S-CURVE
+    # ============================================================
     st.markdown("""
     <div class="section-divider">
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">⛽ BBM Analysis</span>
+        <span class="section-divider-text">📈 Production S-Curve</span>
         <div class="section-divider-line"></div>
     </div>
     """, unsafe_allow_html=True)
     
-    col_bbm1, col_bbm2 = st.columns([2, 1])
-    
-    with col_bbm1:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Konsumsi BBM per Alat</span><span class="chart-badge">Top 15</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_bbm_filtered.empty and 'Total' in df_bbm_filtered.columns:
-            df_bbm_chart = df_bbm_filtered.nlargest(15, 'Total')
+    # Try to build S-Curve from Analisa Produksi
+    if not df_prod.empty:
+        try:
+            # Find Tanggal, Plan, Aktual in header row
+            header_row = df_prod.iloc[0].tolist()
+            tanggal_idx = next((i for i, v in enumerate(header_row) if 'tanggal' in str(v).lower()), 0)
+            plan_idx = next((i for i, v in enumerate(header_row) if 'plan' in str(v).lower()), 1)
+            aktual_idx = next((i for i, v in enumerate(header_row) if 'aktual' in str(v).lower()), 2)
             
-            color_col = 'Kategori' if 'Kategori' in df_bbm_chart.columns else None
-            fig = px.bar(
-                df_bbm_chart,
-                x='Total',
-                y='Tipe Alat',
-                orientation='h',
-                color=color_col,
-                color_discrete_map={'Excavator': MINING_COLORS['gold'], 'Dump Truck': MINING_COLORS['blue'], 'Support': MINING_COLORS['green']}
-            )
-            fig.update_layout(**get_chart_layout(height=400))
-            fig.update_traces(hovertemplate='<b>%{y}</b><br>BBM: %{x:,.0f} L<extra></extra>')
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data BBM tidak tersedia")
-    
-    with col_bbm2:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🥧 Distribusi BBM</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_bbm_filtered.empty and 'Kategori' in df_bbm_filtered.columns:
-            bbm_by_kategori = df_bbm_filtered.groupby('Kategori')['Total'].sum().reset_index()
+            # Extract data
+            df_chart = df_prod.iloc[1:, [tanggal_idx, plan_idx, aktual_idx]].copy()
+            df_chart.columns = ['Tanggal', 'Plan', 'Aktual']
+            df_chart['Plan'] = pd.to_numeric(df_chart['Plan'], errors='coerce').fillna(0)
+            df_chart['Aktual'] = pd.to_numeric(df_chart['Aktual'], errors='coerce').fillna(0)
+            df_chart = df_chart[df_chart['Plan'] > 0]  # Filter valid rows
             
-            fig = px.pie(bbm_by_kategori, values='Total', names='Kategori', hole=0.6,
-                        color_discrete_sequence=[MINING_COLORS['gold'], MINING_COLORS['blue'], MINING_COLORS['green']])
-            fig.update_layout(**get_chart_layout(height=400, show_legend=True))
-            fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=11)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data tidak tersedia")
-    
-    # BBM Trend
-    st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📈 Tren Konsumsi BBM Harian</span></div></div>', unsafe_allow_html=True)
-    
-    if not df_bbm_filtered.empty:
-        day_cols = [col for col in df_bbm_filtered.columns if str(col).isdigit()]
-        if day_cols:
-            daily_bbm = df_bbm_filtered[day_cols].sum()
-            daily_df = pd.DataFrame({'Tanggal': [int(x) for x in daily_bbm.index], 'BBM': daily_bbm.values})
-            daily_df = daily_df[daily_df['BBM'] > 0]
+            # Cumulative
+            df_chart['Cum_Plan'] = df_chart['Plan'].cumsum()
+            df_chart['Cum_Aktual'] = df_chart['Aktual'].cumsum()
             
-            if not daily_df.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=daily_df['Tanggal'], y=daily_df['BBM'],
-                    mode='lines+markers', name='BBM',
-                    line=dict(color=MINING_COLORS['red'], width=2),
-                    fill='tozeroy', fillcolor='rgba(239,68,68,0.1)',
-                    hovertemplate='Tanggal %{x}<br>BBM: %{y:,.0f} L<extra></extra>'
-                ))
-                avg_bbm = daily_df['BBM'].mean()
-                fig.add_hline(y=avg_bbm, line_dash="dash", line_color=MINING_COLORS['gold'],
-                             annotation_text=f"Avg: {avg_bbm:,.0f} L")
-                fig.update_layout(**get_chart_layout(height=300))
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # Ritase Analysis Section
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">🚛 Ritase Analysis</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_rit1, col_rit2 = st.columns([2, 1])
-    
-    with col_rit1:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Ritase per Front/Lokasi</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_ritase_filtered.empty:
-            front_cols = ['Front B LS', 'Front B Clay', 'Front B LS MIX', 'Front C LS', 'Front C LS MIX',
-                         'PLB LS', 'PLB SS', 'PLT SS', 'PLT MIX', 'Timbunan']
-            available_fronts = [c for c in front_cols if c in df_ritase_filtered.columns]
-            
-            if available_fronts:
-                front_totals = df_ritase_filtered[available_fronts].sum()
-                front_df = pd.DataFrame({'Front': front_totals.index, 'Ritase': front_totals.values})
-                front_df = front_df[front_df['Ritase'] > 0].sort_values('Ritase', ascending=True)
-                
-                fig = px.bar(front_df, x='Ritase', y='Front', orientation='h',
-                            color='Ritase', color_continuous_scale=[[0, MINING_COLORS['blue']], [1, MINING_COLORS['gold']]])
-                fig.update_layout(**get_chart_layout(height=400, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data Ritase tidak tersedia")
-    
-    with col_rit2:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Ritase per Shift</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_ritase_filtered.empty and 'Shift' in df_ritase_filtered.columns and 'Total_Ritase' in df_ritase_filtered.columns:
-            shift_data = df_ritase_filtered.groupby('Shift')['Total_Ritase'].sum().reset_index()
-            shift_data['Shift'] = shift_data['Shift'].astype(str)
-            
-            fig = px.bar(shift_data, x='Shift', y='Total_Ritase', color='Shift',
-                        color_discrete_sequence=[MINING_COLORS['blue'], MINING_COLORS['green'], MINING_COLORS['orange']])
-            fig.update_layout(**get_chart_layout(height=400, show_legend=False))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data tidak tersedia")
-    
-    # Plan vs Actual Section
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">🎯 Plan vs Actual</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    df_prod_month = load_analisa_produksi(selected_bulan) if selected_bulan != 'Semua' else df_produksi
-    
-    col_prod1, col_prod2 = st.columns([2, 1])
-    
-    with col_prod1:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Plan vs Aktual Produksi</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_prod_month.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=df_prod_month['Tanggal'], y=df_prod_month['Aktual'],
-                                name='Aktual', marker_color=MINING_COLORS['blue']))
-            fig.add_trace(go.Scatter(x=df_prod_month['Tanggal'], y=df_prod_month['Plan'],
-                                    name='Plan', mode='lines', line=dict(color=MINING_COLORS['red'], width=2, dash='dash')))
-            fig.update_layout(**get_chart_layout(height=350))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data Produksi tidak tersedia")
-    
-    with col_prod2:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🎯 Ketercapaian</span></div></div>', unsafe_allow_html=True)
-        
-        if not df_prod_month.empty:
-            total_plan = df_prod_month['Plan'].sum()
-            total_aktual = df_prod_month['Aktual'].sum()
-            pct = (total_aktual / total_plan * 100) if total_plan > 0 else 0
-            
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number+delta", value=pct,
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': "Achievement %", 'font': {'size': 14, 'color': '#94a3b8'}},
-                delta={'reference': 100, 'increasing': {'color': MINING_COLORS['green']}},
-                gauge={
-                    'axis': {'range': [None, 120], 'tickcolor': '#94a3b8'},
-                    'bar': {'color': MINING_COLORS['gold']},
-                    'bgcolor': 'rgba(0,0,0,0)',
-                    'steps': [
-                        {'range': [0, 80], 'color': 'rgba(239,68,68,0.3)'},
-                        {'range': [80, 100], 'color': 'rgba(245,158,11,0.3)'},
-                        {'range': [100, 120], 'color': 'rgba(16,185,129,0.3)'}
-                    ],
-                    'threshold': {'line': {'color': MINING_COLORS['red'], 'width': 4}, 'thickness': 0.75, 'value': 100}
-                }
+            fig_s = go.Figure()
+            fig_s.add_trace(go.Scatter(
+                x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Plan'],
+                mode='lines', name='Cumulative Plan',
+                line=dict(color='#d4a84b', width=3, dash='dash')
             ))
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font={'color': '#94a3b8'}, height=350, margin=dict(l=20, r=20, t=60, b=20))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 Data tidak tersedia")
+            fig_s.add_trace(go.Scatter(
+                x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Aktual'],
+                mode='lines+markers', name='Cumulative Aktual',
+                line=dict(color='#10b981', width=4),
+                fill='tonexty', fillcolor='rgba(16, 185, 129, 0.1)'
+            ))
+            fig_s.update_layout(
+                **get_chart_layout(height=400),
+                xaxis_title="Hari",
+                yaxis_title="Tonase (Kumulatif)",
+                legend=dict(orientation="h", y=1.1),
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_s, use_container_width=True)
+        except Exception as e:
+            st.info(f"ℹ️ Data S-Curve tidak tersedia: {e}")
+    else:
+        st.info("ℹ️ Data Analisa Produksi tidak tersedia.")
     
-    # Tonase per Jam Section
-    if not df_tonase.empty:
-        st.markdown("""
-        <div class="section-divider">
-            <div class="section-divider-line"></div>
-            <span class="section-divider-text">⏰ Tonase per Jam</span>
-            <div class="section-divider-line"></div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Distribusi Tonase per Jam (24 Jam)</span></div></div>', unsafe_allow_html=True)
-        
-        hour_cols = [col for col in df_tonase.columns if '-' in str(col) and col not in ['Tanggal', 'Ritase', 'Total']]
-        if hour_cols:
-            hourly_avg = df_tonase[hour_cols].mean()
-            hourly_df = pd.DataFrame({'Jam': hourly_avg.index, 'Avg_Tonase': hourly_avg.values})
-            
-            fig = px.bar(hourly_df, x='Jam', y='Avg_Tonase', color='Avg_Tonase',
-                        color_continuous_scale=[[0, '#1e3a5f'], [0.5, MINING_COLORS['blue']], [1, MINING_COLORS['gold']]])
-            fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-            fig.update_coloraxes(showscale=False)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # Data Tables
+    # ============================================================
+    # SECTION 2: RITASE BY LOCATION
+    # ============================================================
     st.markdown("""
     <div class="section-divider">
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">📋 Data Tables</span>
+        <span class="section-divider-text">📍 Ritase Distribution</span>
         <div class="section-divider-line"></div>
     </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📊 BBM Data", "🚛 Ritase Data", "🎯 Produksi Data"])
+    col_r1, col_r2 = st.columns(2)
     
-    with tab1:
-        if not df_bbm_filtered.empty:
-            display_cols = ['Tipe Alat', 'Kategori', 'Total'] if 'Kategori' in df_bbm_filtered.columns else ['Tipe Alat', 'Total']
-            display_cols = [c for c in display_cols if c in df_bbm_filtered.columns]
-            st.dataframe(df_bbm_filtered[display_cols].sort_values('Total', ascending=False), use_container_width=True, hide_index=True)
-            csv = df_bbm_filtered.to_csv(index=False)
-            st.download_button("📥 Export BBM (CSV)", csv, f"bbm_data_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
-        else:
-            st.info("Data tidak tersedia")
+    if not df_rit.empty:
+        try:
+            # Aggregate by location
+            exclude = ['Tanggal', 'Shift', 'Pengawasan']
+            loc_cols = [c for c in df_rit.columns if c not in exclude 
+                        and not str(c).startswith('Unnamed') 
+                        and not str(c).startswith('Tanggal')
+                        and 'Sum of' not in str(c)
+                        and '(All)' not in str(c)]
+            
+            loc_data = []
+            for col in loc_cols:
+                total = pd.to_numeric(df_rit[col], errors='coerce').sum()
+                if total > 0:
+                    loc_data.append({'Location': col, 'Ritase': total})
+            
+            if loc_data:
+                df_loc = pd.DataFrame(loc_data).sort_values('Ritase', ascending=True)
+                
+                with col_r1:
+                    fig_loc = px.bar(
+                        df_loc.tail(10), y='Location', x='Ritase',
+                        orientation='h',
+                        title='🏆 Top 10 Loading Points',
+                        color='Ritase', color_continuous_scale='Viridis',
+                        text_auto='.0f'
+                    )
+                    fig_loc.update_layout(**get_chart_layout(height=400))
+                    st.plotly_chart(fig_loc, use_container_width=True)
+                    
+                with col_r2:
+                    # Pie chart
+                    fig_pie = px.pie(
+                        df_loc, values='Ritase', names='Location',
+                        title='📊 Ritase Proportion',
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Bold
+                    )
+                    fig_pie.update_layout(**get_chart_layout(height=400))
+                    fig_pie.update_traces(textposition='inside', textinfo='percent')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+        except Exception as e:
+            st.info(f"ℹ️ Error processing Ritase: {e}")
+    else:
+        st.info("ℹ️ Data Ritase tidak tersedia.")
     
-    with tab2:
-        if not df_ritase_filtered.empty:
-            display_cols = ['Tanggal', 'Shift', 'Total_Ritase']
-            display_cols = [c for c in display_cols if c in df_ritase_filtered.columns]
-            st.dataframe(df_ritase_filtered[display_cols].sort_values('Tanggal', ascending=False).head(50), use_container_width=True, hide_index=True)
-            csv = df_ritase_filtered.to_csv(index=False)
-            st.download_button("📥 Export Ritase (CSV)", csv, f"ritase_data_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
-        else:
-            st.info("Data tidak tersedia")
+    # ============================================================
+    # SECTION 3: FUEL ANALYTICS
+    # ============================================================
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">⛽ Fuel Analytics</span>
+        <div class="section-divider-line"></div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    with tab3:
-        if not df_prod_month.empty:
-            st.dataframe(df_prod_month, use_container_width=True, hide_index=True)
-            csv = df_prod_month.to_csv(index=False)
-            st.download_button("📥 Export Produksi (CSV)", csv, f"produksi_data_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
-        else:
-            st.info("Data tidak tersedia")
+    col_b1, col_b2 = st.columns(2)
+    
+    if not df_bbm.empty:
+        try:
+            with col_b1:
+                # BBM by Unit Type
+                if 'Tipe Alat' in df_bbm.columns and 'Total' in df_bbm.columns:
+                    df_type = df_bbm.groupby('Tipe Alat')['Total'].sum().reset_index()
+                    df_type['Total'] = pd.to_numeric(df_type['Total'], errors='coerce')
+                    df_type = df_type[df_type['Total'] > 0]
+                    
+                    fig_type = px.pie(
+                        df_type, values='Total', names='Tipe Alat',
+                        title='⛽ BBM by Unit Type',
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Bold
+                    )
+                    fig_type.update_layout(**get_chart_layout(height=350))
+                    fig_type.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_type, use_container_width=True)
+                    
+            with col_b2:
+                # Top 10 BBM Consumers
+                if 'Alat Berat' in df_bbm.columns and 'Total' in df_bbm.columns:
+                    df_top = df_bbm[['Alat Berat', 'Tipe Alat', 'Total']].copy()
+                    df_top['Total'] = pd.to_numeric(df_top['Total'], errors='coerce')
+                    df_top = df_top.nlargest(10, 'Total')
+                    
+                    fig_top = px.bar(
+                        df_top, x='Total', y='Alat Berat',
+                        orientation='h', color='Tipe Alat',
+                        title='🚨 Top 10 Fuel Consumers',
+                        text_auto='.0f'
+                    )
+                    fig_top.update_layout(**get_chart_layout(height=350), yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig_top, use_container_width=True)
+        except Exception as e:
+            st.info(f"ℹ️ Error processing BBM: {e}")
+    else:
+        st.info("ℹ️ Data BBM tidak tersedia.")
+    
+    # ============================================================
+    # SECTION 4: GANGGUAN OVERVIEW
+    # ============================================================
+    st.markdown("""
+    <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <span class="section-divider-text">🚨 Gangguan Overview</span>
+        <div class="section-divider-line"></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if not df_gang.empty:
+        try:
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                # Gangguan by Kendala
+                if 'Kendala' in df_gang.columns:
+                    df_kendala = df_gang.groupby('Kendala').size().reset_index(name='Frekuensi')
+                    df_kendala = df_kendala[df_kendala['Kendala'].notna()]
+                    
+                    fig_kendala = px.bar(
+                        df_kendala.nlargest(10, 'Frekuensi'), 
+                        x='Frekuensi', y='Kendala',
+                        orientation='h',
+                        title='📊 Gangguan by Kendala',
+                        color='Frekuensi',
+                        color_continuous_scale='Reds'
+                    )
+                    fig_kendala.update_layout(**get_chart_layout(height=350))
+                    st.plotly_chart(fig_kendala, use_container_width=True)
+                    
+            with col_g2:
+                # Gangguan by Masalah
+                if 'Masalah' in df_gang.columns:
+                    df_masalah = df_gang.groupby('Masalah').size().reset_index(name='Frekuensi')
+                    df_masalah = df_masalah[df_masalah['Masalah'].notna()]
+                    
+                    fig_masalah = px.pie(
+                        df_masalah.nlargest(8, 'Frekuensi'),
+                        values='Frekuensi', names='Masalah',
+                        title='📊 Top Masalah',
+                        hole=0.4
+                    )
+                    fig_masalah.update_layout(**get_chart_layout(height=350))
+                    st.plotly_chart(fig_masalah, use_container_width=True)
+        except Exception as e:
+            st.info(f"ℹ️ Error processing Gangguan: {e}")
+    else:
+        st.info("ℹ️ Data Gangguan tidak tersedia.")
+    
+    # ============================================================
+    # DATA TABLES & EXPORT
+    # ============================================================
+    st.markdown("### 📥 Data Export")
+    
+    col_exp1, col_exp2, col_exp3 = st.columns(3)
+    
+    with col_exp1:
+        if not df_bbm.empty:
+            buf = io.BytesIO()
+            df_bbm.to_excel(buf, index=False, sheet_name='BBM')
+            st.download_button("📥 Export BBM", buf.getvalue(), "BBM_Export.xlsx", use_container_width=True)
+            
+    with col_exp2:
+        if not df_rit.empty:
+            buf = io.BytesIO()
+            df_rit.to_excel(buf, index=False, sheet_name='Ritase')
+            st.download_button("📥 Export Ritase", buf.getvalue(), "Ritase_Export.xlsx", use_container_width=True)
+            
+    with col_exp3:
+        if not df_gang.empty:
+            buf = io.BytesIO()
+            df_gang.to_excel(buf, index=False, sheet_name='Gangguan')
+            st.download_button("📥 Export Gangguan", buf.getvalue(), "Gangguan_Export.xlsx", use_container_width=True)

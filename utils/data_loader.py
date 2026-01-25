@@ -372,33 +372,91 @@ def load_gangguan(bulan):
 def load_gangguan_all():
     """
     Load data gangguan lengkap dari sheet 'All'
+    Handles dual structure: data before Nov 2025 without Crusher, Nov 2025+ with Crusher
     Returns: DataFrame dengan semua data gangguan
     """
-    df = None
+    file_path = None
     
-    # Try OneDrive first
-    if ONEDRIVE_LINKS.get("gangguan"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='All')
-            except:
-                pass
+    # Try local OneDrive folder first
+    local_path = load_from_local("gangguan")
+    if local_path:
+        file_path = local_path
     
-    # Fallback to local
-    if df is None:
-        local_path = load_from_local("gangguan")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='All')
-            except:
-                pass
-    
-    if df is None:
+    if file_path is None:
         return pd.DataFrame()
     
     try:
-        # Filter out header rows
+        # Read raw data without header to handle multi-structure
+        df_raw = pd.read_excel(file_path, sheet_name='All', header=None)
+        
+        # Find all header rows (where column 0 = 'Tanggal')
+        header_mask = df_raw[0] == 'Tanggal'
+        header_indices = df_raw[header_mask].index.tolist()
+        
+        if len(header_indices) == 0:
+            return pd.DataFrame()
+        
+        # Define standard columns (with Crusher) - 27 columns 
+        standard_cols = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 
+                        'Durasi', 'Crusher', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
+                        'Info CCR', 'Sub Komponen', 'Keterangan', 'Penyebab', 
+                        'Identifikasi Masalah', 'Action', 'Plan', 'PIC', 'Status', 'Due Date',
+                        'Spare Part', 'Info Spare Part', 'Link/Lampiran', 'Extra']
+        
+        # Columns without Crusher (old format) - 26 columns to match Excel
+        old_cols = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 
+                   'Durasi', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
+                   'Info CCR', 'Sub Komponen', 'Keterangan', 'Penyebab', 
+                   'Identifikasi Masalah', 'Action', 'Plan', 'PIC', 'Status', 'Due Date',
+                   'Spare Part', 'Info Spare Part', 'Link/Lampiran', 'Extra']
+        
+        all_dfs = []
+        
+        for i, header_idx in enumerate(header_indices):
+            # Determine end of this section
+            if i + 1 < len(header_indices):
+                end_idx = header_indices[i + 1]
+            else:
+                end_idx = len(df_raw)
+            
+            # Get header row
+            header_row = df_raw.iloc[header_idx].tolist()
+            
+            # Check if this section has Crusher column
+            has_crusher = 'Crusher' in header_row
+            
+            # Get data rows for this section
+            section_data = df_raw.iloc[header_idx + 1:end_idx].copy()
+            
+            if section_data.empty:
+                continue
+            
+            # Assign column names based on header
+            if has_crusher:
+                # New format with Crusher
+                section_data.columns = header_row[:len(section_data.columns)]
+            else:
+                # Old format without Crusher - add Crusher column
+                section_data.columns = old_cols[:len(section_data.columns)]
+                section_data['Crusher'] = None
+            
+            # Ensure all standard columns exist
+            for col in standard_cols:
+                if col not in section_data.columns:
+                    section_data[col] = None
+            
+            # Select only standard columns in order
+            section_data = section_data[[c for c in standard_cols if c in section_data.columns]]
+            
+            all_dfs.append(section_data)
+        
+        if not all_dfs:
+            return pd.DataFrame()
+        
+        # Combine all sections
+        df = pd.concat(all_dfs, ignore_index=True)
+        
+        # Filter out any remaining header rows
         df = df[df['Bulan'] != 'Bulan'].copy()
         
         # Convert data types
@@ -406,6 +464,7 @@ def load_gangguan_all():
         df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce')
         df['Durasi'] = pd.to_numeric(df['Durasi'], errors='coerce')
         df['Tahun'] = pd.to_numeric(df['Tahun'], errors='coerce')
+        df['Week'] = pd.to_numeric(df['Week'], errors='coerce')
         
         # Parse Tanggal
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
@@ -423,17 +482,12 @@ def load_gangguan_all():
             'Downtime Belt Conveyor': 'Downtime Belt Conveyor',
             'Downtime belt conveyor': 'Downtime Belt Conveyor',
             'Downtime Crusher': 'Downtime Crusher',
+            'downtime crusher': 'Downtime Crusher',
         }
         df['Kelompok Masalah'] = df['Kelompok Masalah'].replace(kelompok_map)
         
-        # Filter valid Kelompok Masalah
-        valid_kelompok = [
-            'Delay Operational CC', 
-            'Delay Operational DBLH', 
-            'Downtime Belt Conveyor', 
-            'Downtime Crusher'
-        ]
-        df = df[df['Kelompok Masalah'].isin(valid_kelompok)]
+        # Remove rows with missing Kelompok Masalah
+        df = df[df['Kelompok Masalah'].notna()]
         
         # Map bulan number to name
         bulan_names = {
@@ -450,6 +504,8 @@ def load_gangguan_all():
         
     except Exception as e:
         print(f"Error loading gangguan: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 
@@ -479,92 +535,285 @@ def get_gangguan_summary(df):
 
 
 @st.cache_data(ttl=CACHE_TTL)
-def load_bbm():
-    """Load data BBM"""
+def load_bbm_enhanced():
+    """
+    Load and transform BBM data to Long Format [Date, Unit, Category, Liters]
+    Handles dynamic date columns (1-31)
+    """
     df = None
+    sheet_name = 'BBM'
     
+    # Try OneDrive then Local
     if ONEDRIVE_LINKS.get("monitoring"):
         file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
         if file_buffer:
             try:
-                df = pd.read_excel(file_buffer, sheet_name='BBM')
-            except:
-                pass
-    
+                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+            except: pass
+            
     if df is None:
         local_path = load_from_local("monitoring")
         if local_path:
             try:
-                df = pd.read_excel(local_path, sheet_name='BBM')
-            except:
-                pass
-    
-    if df is None:
+                df = pd.read_excel(local_path, sheet_name=sheet_name)
+            except: pass
+            
+    if df is None or df.empty:
         return pd.DataFrame()
-    
+        
     try:
+        # Cleanup
         if 'Total' in df.columns:
-            df = df[df['Total'] != 'Total']
-            df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
+            df = df[df['Total'] != 'Total'] # Remove footer rows if any
+            
+        # Identify Metadata columns vs Date columns
+        # Based on debug: ['No', 'Alat Berat', 'Tipe Alat', 'Kategori', '1', '2', ... 'Total']
+        meta_cols = ['No', 'Alat Berat', 'Tipe Alat', 'Kategori', 'Total']
         
-        for col in df.columns:
-            if col not in ['No', 'Alat Berat', 'Tipe Alat', 'Total']:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        # Ensure regex/type matching for '1', '2', '31' columns
+        # Force columns to string for easier matching, but keep original for melt
+        df.columns = [str(c) for c in df.columns]
         
-        df = df[df['No'].notna()]
-        df = df[df['Alat Berat'].notna()]
-        df = df.reset_index(drop=True)
+        # Re-identify date columns (digits 1-31)
+        date_cols = [c for c in df.columns if c.isdigit() and 1 <= int(c) <= 31]
         
-        return df
-    except:
+        # Melt (Unpivot) to Long Format
+        # id_vars are the metadata columns that exist
+        current_meta = [c for c in meta_cols if c in df.columns]
+        
+        if not date_cols:
+            return pd.DataFrame() # No date columns found
+            
+        df_melted = df.melt(id_vars=current_meta, 
+                           value_vars=date_cols,
+                           var_name='Day', value_name='Liters')
+        
+        # Validation & Formatting
+        df_melted['Liters'] = pd.to_numeric(df_melted['Liters'], errors='coerce').fillna(0)
+        df_melted = df_melted[df_melted['Liters'] > 0]  # Optimize: remove zero records
+        
+        # Create full Date column
+        # Assuming current year (2025) and month (January) from context or file
+        current_year = 2025
+        current_month = 1 
+        
+        # Note: In a real app, month should be inferred from filename or user input.
+        # For now, we fix to Jan 2025 as per user context.
+        
+        dates = []
+        for day in df_melted['Day']:
+            try:
+                dates.append(pd.Timestamp(year=current_year, month=current_month, day=int(day)))
+            except:
+                dates.append(pd.NaT)
+        df_melted['Date'] = dates
+        df_melted = df_melted.dropna(subset=['Date'])
+        
+        # Standardize columns
+        final_cols = {
+            'Alat Berat': 'Unit',
+            'Tipe Alat': 'Type',
+            'Kategori': 'Category' 
+        }
+        df_melted = df_melted.rename(columns=final_cols)
+        
+        # Ensure required columns exist
+        required_cols = ['Date', 'Unit', 'Type', 'Category', 'Liters']
+        for col in required_cols:
+            if col not in df_melted.columns:
+                 df_melted[col] = None
+                 
+        return df_melted[required_cols].reset_index(drop=True)
+        
+    except Exception as e:
+        print(f"Error loading BBM enhanced: {e}")
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=CACHE_TTL)
-def load_analisa_produksi(bulan='Januari'):
-    """Load data analisa produksi per bulan"""
-    bulan_map = {'Januari': 0, 'Februari': 5}
-    
-    if bulan not in bulan_map:
-        return pd.DataFrame()
-    
-    start_col = bulan_map[bulan]
+def load_ritase_enhanced():
+    """
+    Load and transform Ritase data to Long Format [Date, Shift, Location, Ritase]
+    """
     df = None
+    sheet_name = 'Ritase'
     
+    # Try OneDrive then Local
     if ONEDRIVE_LINKS.get("monitoring"):
         file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
         if file_buffer:
             try:
-                df = pd.read_excel(file_buffer, sheet_name='Analisa Produksi')
-            except:
-                pass
-    
+                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+            except: pass
+            
     if df is None:
         local_path = load_from_local("monitoring")
         if local_path:
             try:
-                df = pd.read_excel(local_path, sheet_name='Analisa Produksi')
-            except:
-                pass
+                df = pd.read_excel(local_path, sheet_name=sheet_name)
+            except: pass
+            
+    if df is None or df.empty:
+        return pd.DataFrame()
+        
+    try:
+        # Standardize Date
+        if 'Tanggal' not in df.columns:
+             # Try finding date column by type
+             for col in df.columns:
+                 if pd.api.types.is_datetime64_any_dtype(df[col]):
+                     df = df.rename(columns={col: 'Tanggal'})
+                     break
+                     
+        if 'Tanggal' in df.columns:
+            df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
+            df = df[df['Tanggal'].notna()]
+        else:
+             return pd.DataFrame() # Parsing failed
+        
+        # Clean Shift
+        if 'Shift' in df.columns:
+            df = df[df['Shift'].isin([1, 2, 3, '1', '2', '3'])]
+            df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce').astype('Int64')
+        else:
+            df['Shift'] = 1 # Default if missing
+            
+        # Identify Location columns (Fronts, Stockpiles, etc.)
+        # Exclude metadata columns and 'Unnamed' junk
+        exclude_cols = ['Tanggal', 'Shift', 'Pengawasan', 'Total', 'No', 'Day', 'Date']
+        
+        # Filter columns that are NOT metadata AND NOT Unnamed
+        loc_cols = [c for c in df.columns if c not in exclude_cols and not str(c).startswith('Unnamed') and 'Total' not in str(c)]
+        
+        if not loc_cols:
+            return pd.DataFrame()
+            
+        # Melt to Long Format
+        df_melted = df.melt(id_vars=['Tanggal', 'Shift'], 
+                           value_vars=loc_cols,
+                           var_name='Location', value_name='Ritase')
+        
+        # Filter valid data
+        df_melted['Ritase'] = pd.to_numeric(df_melted['Ritase'], errors='coerce').fillna(0)
+        df_melted = df_melted[df_melted['Ritase'] > 0]
+        
+        # Clean Location Names (remove 'Sum of' if present)
+        df_melted['Location'] = df_melted['Location'].astype(str).str.replace('Sum of ', '', regex=False)
+        
+        return df_melted[['Tanggal', 'Shift', 'Location', 'Ritase']].reset_index(drop=True)
+        
+    except Exception as e:
+        print(f"Error loading Ritase enhanced: {e}")
+        return pd.DataFrame()
+
+
+# ==========================================
+# BACKWARD COMPATIBILITY ALIASES
+# ==========================================
+# These functions are kept to prevent ImportErrors in other modules
+# that might still reference the old names.
+load_bbm = load_bbm_enhanced
+load_ritase = load_ritase_enhanced
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_gangguan():
+    """Legacy wrapper for load_gangguan_all or load_gangguan_monitoring"""
+    return load_gangguan_monitoring() # Basic fallback
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_analisa_produksi(bulan='Januari'):
+    """Legacy wrapper for backward compatibility"""
+    # Load all data first
+    df_all = load_analisa_produksi_all()
+    if df_all.empty:
+        return pd.DataFrame()
+        
+    # Filter by month name
+    # Ensure bulan matches the new format or map it if necessary
+    # The new function returns 'Month' column with full names (Januari, Februari, etc.)
+    if 'Month' in df_all.columns:
+        return df_all[df_all['Month'] == bulan]
     
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_analisa_produksi_all():
+    """Load Analisa Produksi for S-Curve (Plan vs Actual)"""
+    df = None
+    sheet_name = 'Analisa Produksi'
+    
+    # Try OneDrive then Local
+    if ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
+            try:
+                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+            except: pass
+            
     if df is None:
+        local_path = load_from_local("monitoring")
+        if local_path:
+            try:
+                df = pd.read_excel(local_path, sheet_name=sheet_name)
+            except: pass
+            
+    if df is None or df.empty:
         return pd.DataFrame()
     
     try:
-        df_bulan = df.iloc[1:32, start_col:start_col+4].copy()
-        df_bulan.columns = ['Tanggal', 'Plan', 'Aktual', 'Ketercapaian']
+        # The sheet has multiple months horizontally.
+        # Structure: [Januari] [Februari] side by side
+        # Need to iterate and extract
         
-        df_bulan['Tanggal'] = pd.to_numeric(df_bulan['Tanggal'], errors='coerce')
-        df_bulan['Plan'] = pd.to_numeric(df_bulan['Plan'], errors='coerce')
-        df_bulan['Aktual'] = pd.to_numeric(df_bulan['Aktual'], errors='coerce')
-        df_bulan['Ketercapaian'] = pd.to_numeric(df_bulan['Ketercapaian'], errors='coerce')
+        processed_data = []
+        months = {'Januari': 0, 'Februari': 5, 'Maret': 10, 'April': 15, 'Mei': 20, 'Juni': 25, 
+                  'Juli': 30, 'Agustus': 35, 'September': 40, 'Oktober': 45, 'November': 50, 'Desember': 55}
+                  
+        for month_name, start_col in months.items():
+            try:
+                if start_col + 3 >= len(df.columns):
+                    continue
+                    
+                # Extract block
+                df_month = df.iloc[1:33, start_col:start_col+4].copy() # Assuming 31 days max + 1 header
+                df_month.columns = ['Day', 'Plan', 'Actual', 'Ach']
+                
+                # Clean
+                df_month = df_month.dropna(subset=['Day'])
+                df_month = df_month[pd.to_numeric(df_month['Day'], errors='coerce').notna()]
+                
+                # Add Metadata
+                df_month['Month'] = month_name
+                
+                # Convert numbers
+                df_month['Plan'] = pd.to_numeric(df_month['Plan'], errors='coerce').fillna(0)
+                df_month['Actual'] = pd.to_numeric(df_month['Actual'], errors='coerce').fillna(0)
+                
+                # Create Date (Assuming Year 2025)
+                # Need mapping for month number
+                month_num = list(months.keys()).index(month_name) + 1
+                dates = []
+                for day in df_month['Day']:
+                    try:
+                        dates.append(pd.Timestamp(year=2025, month=month_num, day=int(day)))
+                    except:
+                        dates.append(pd.NaT)
+                df_month['Date'] = dates
+                df_month = df_month.dropna(subset=['Date'])
+                
+                processed_data.append(df_month[['Date', 'Month', 'Plan', 'Actual']])
+                
+            except Exception as e:
+                continue
+                
+        if not processed_data:
+            return pd.DataFrame()
+            
+        return pd.concat(processed_data, ignore_index=True)
         
-        df_bulan = df_bulan.dropna(subset=['Tanggal'])
-        df_bulan['Bulan'] = bulan
-        df_bulan = df_bulan.reset_index(drop=True)
-        
-        return df_bulan
-    except:
+    except Exception as e:
+        print(f"Error loading Analisa Produksi: {e}")
         return pd.DataFrame()
 
 

@@ -461,22 +461,34 @@ def show_produksi():
     # Export button
     col1, col2 = st.columns([4, 1])
     with col2:
-        cols_export = ['Date', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Rit', 'Tonnase']
+        import io
+        buffer = io.BytesIO()
+        # Export with original column names
+        cols_export = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         cols_export = [c for c in cols_export if c in df_filtered.columns]
-        csv = df_filtered[cols_export].to_csv(index=False)
-        st.download_button("📥 Export CSV", csv, "produksi_export.csv", "text/csv", use_container_width=True)
+        
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_filtered[cols_export].sort_index(ascending=False).to_excel(writer, index=False, sheet_name='Produksi')
+            
+        st.download_button(
+            label="📥 Export Excel",
+            data=buffer.getvalue(),
+            file_name=f"produksi_export_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
     
     # Table
-    cols_show = ['Date', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Rit', 'Tonnase']
+    cols_show = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
     cols_show = [c for c in cols_show if c in df_filtered.columns]
     
     st.dataframe(
-        df_filtered[cols_show].sort_values('Date', ascending=False),
+        df_filtered[cols_show].sort_index(ascending=False),
         use_container_width=True,
-        height=400,
+        height=450,
         column_config={
-            "Date": st.column_config.DateColumn("Tanggal", format="DD/MM/YYYY"),
-            "Tonnase": st.column_config.NumberColumn("Tonase", format="%.0f"),
-            "Rit": st.column_config.NumberColumn("Ritase", format="%.0f"),
+            "Date": st.column_config.DateColumn(format="DD/MM/YYYY"),
+            "Tonnase": st.column_config.NumberColumn(format="%.0f"),
+            "Rit": st.column_config.NumberColumn(format="%.0f"),
         }
     )

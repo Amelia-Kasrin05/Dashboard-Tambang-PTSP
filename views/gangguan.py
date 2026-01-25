@@ -1,7 +1,7 @@
 # ============================================================
 # GANGGUAN - Production Incident Analysis Page
 # ============================================================
-# VERSION: 2.0 - Full KPI & Charts Implementation
+# VERSION: 3.0 - Professional Layout with Multi-Select Filters
 
 import streamlit as st
 import pandas as pd
@@ -37,385 +37,504 @@ def show_gangguan():
     
     # ===== FILTER SECTION =====
     st.markdown("""
-    <div class="chart-container">
+    <div class="chart-container" style="padding: 1rem;">
         <div class="chart-header">
-            <span class="chart-title">🔍 Filter Data</span>
-            <span class="chart-badge">Interactive</span>
+            <span class="chart-title">🔍 Filter & Analysis Period</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3, col4 = st.columns(4)
+    # Row 1: Date range
+    min_date = df['Tanggal'].min()
+    max_date = df['Tanggal'].max()
     
-    with col1:
-        bulan_options = ['Semua'] + sorted(df['Bulan_Name'].dropna().unique().tolist(), 
-                                           key=lambda x: ['Januari','Februari','Maret','April','Mei','Juni',
-                                                         'Juli','Agustus','September','Oktober','November','Desember'].index(x) 
-                                           if x in ['Januari','Februari','Maret','April','Mei','Juni',
-                                                   'Juli','Agustus','September','Oktober','November','Desember'] else 99)
-        selected_bulan = st.selectbox("📅 Bulan", bulan_options)
+    col_d1, col_d2, col_spacer = st.columns([2, 2, 4])
     
-    with col2:
-        shifts = ['Semua'] + sorted([int(x) for x in df['Shift'].dropna().unique() if pd.notna(x)])
-        shifts = ['Semua'] + [str(s) for s in shifts[1:]]
-        selected_shift = st.selectbox("🔄 Shift", shifts)
+    with col_d1:
+        start_date = st.date_input("Dari", min_date, min_value=min_date, max_value=max_date, key="gang_start")
+    with col_d2:
+        end_date = st.date_input("Sampai", max_date, min_value=min_date, max_value=max_date, key="gang_end")
     
-    with col3:
-        kelompok_list = df['Kelompok Masalah'].dropna().unique().tolist()
-        kelompok = ['Semua'] + sorted([str(k) for k in kelompok_list])
-        selected_kelompok = st.selectbox("📂 Kelompok Masalah", kelompok)
+    # Row 2: Multi-select filters
+    col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
     
-    with col4:
-        # Convert semua ke string untuk menghindari error sorting mixed types
-        alat_list = df['Alat'].dropna().unique().tolist()
-        alat_sorted = sorted([str(a) for a in alat_list])[:50]  # Limit to 50
-        alat_options = ['Semua'] + alat_sorted
-        selected_alat = st.selectbox("🔧 Alat", alat_options)
+    with col_f1:
+        shifts = sorted([int(x) for x in df['Shift'].dropna().unique()])
+        shifts = [str(s) for s in shifts]
+        selected_shifts = st.multiselect("Shift", shifts, default=[], placeholder="Semua", key="gang_shift")
+    
+    with col_f2:
+        kelompok_list = sorted(df['Kelompok Masalah'].dropna().unique().tolist())
+        selected_kelompoks = st.multiselect("Kelompok Masalah", kelompok_list, default=[], placeholder="Semua", key="gang_kelompok")
+    
+    with col_f3:
+        alat_list = sorted([str(a) for a in df['Alat'].dropna().unique().tolist()])
+        selected_alats = st.multiselect("Alat", alat_list, default=[], placeholder="Semua", key="gang_alat")
+    
+    with col_f4:
+        # Crusher filter - new column from November 2025
+        if 'Crusher' in df.columns:
+            crusher_list = sorted([str(c) for c in df['Crusher'].dropna().unique().tolist()])
+            selected_crushers = st.multiselect("Crusher", crusher_list, default=[], placeholder="Semua", key="gang_crusher")
+        else:
+            selected_crushers = []
+    
+    with col_f5:
+        gangguan_list = sorted(df['Gangguan'].dropna().unique().tolist())
+        selected_gangguans = st.multiselect("Jenis Gangguan", gangguan_list, default=[], placeholder="Semua", key="gang_jenis")
     
     # Apply Filters
     df_filtered = df.copy()
-    if selected_bulan != 'Semua':
-        df_filtered = df_filtered[df_filtered['Bulan_Name'] == selected_bulan]
-    if selected_shift != 'Semua':
-        df_filtered = df_filtered[df_filtered['Shift'] == int(selected_shift)]
-    if selected_kelompok != 'Semua':
-        df_filtered = df_filtered[df_filtered['Kelompok Masalah'] == selected_kelompok]
-    if selected_alat != 'Semua':
-        # Convert kolom Alat ke string untuk perbandingan
-        df_filtered = df_filtered[df_filtered['Alat'].astype(str) == selected_alat]
+    df_filtered = df_filtered[(df_filtered['Tanggal'] >= pd.Timestamp(start_date)) & 
+                               (df_filtered['Tanggal'] <= pd.Timestamp(end_date))]
     
-    # Filter info
-    st.markdown(f"""
-    <p style="color:#64748b; font-size:0.85rem; margin:0.5rem 0 1.5rem 0;">
-        📋 Menampilkan <strong style="color:#ef4444;">{len(df_filtered):,}</strong> dari {len(df):,} kejadian
-    </p>
-    """, unsafe_allow_html=True)
+    if selected_shifts:
+        df_filtered = df_filtered[df_filtered['Shift'].astype(str).isin(selected_shifts)]
+    if selected_kelompoks:
+        df_filtered = df_filtered[df_filtered['Kelompok Masalah'].isin(selected_kelompoks)]
+    if selected_alats:
+        df_filtered = df_filtered[df_filtered['Alat'].astype(str).isin(selected_alats)]
+    if selected_crushers and 'Crusher' in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered['Crusher'].astype(str).isin(selected_crushers)]
+    if selected_gangguans:
+        df_filtered = df_filtered[df_filtered['Gangguan'].isin(selected_gangguans)]
     
     # ===== KPI CARDS =====
-    summary = get_gangguan_summary(df_filtered)
-    
-    # Calculate incident rate (per day)
+    total_incidents = len(df_filtered)
+    total_downtime = df_filtered['Durasi'].sum() if not df_filtered.empty else 0
+    mttr = df_filtered['Durasi'].mean() * 60 if not df_filtered.empty else 0  # Convert to minutes
     total_days = df_filtered['Tanggal'].nunique() if not df_filtered.empty else 1
-    incident_rate = len(df_filtered) / max(total_days, 1)
+    incident_rate = total_incidents / max(total_days, 1)
+    total_alat = df_filtered['Alat'].nunique() if not df_filtered.empty else 0
+    
+    # Get availability (assuming 24 hours per day operation)
+    total_hours = total_days * 24
+    availability = ((total_hours - total_downtime) / total_hours * 100) if total_hours > 0 else 100
     
     st.markdown(f"""
     <div class="kpi-grid">
         <div class="kpi-card" style="--card-accent: #ef4444;">
             <div class="kpi-icon">🚨</div>
             <div class="kpi-label">Total Incidents</div>
-            <div class="kpi-value">{summary['total_incidents']:,}</div>
-            <div class="kpi-subtitle">kejadian tercatat</div>
+            <div class="kpi-value">{total_incidents:,}</div>
+            <div class="kpi-subtitle">{total_days} hari</div>
         </div>
         <div class="kpi-card" style="--card-accent: #f59e0b;">
             <div class="kpi-icon">⏱️</div>
             <div class="kpi-label">Total Downtime</div>
-            <div class="kpi-value">{summary['total_downtime']:,.1f}</div>
+            <div class="kpi-value">{total_downtime:,.1f}</div>
             <div class="kpi-subtitle">jam</div>
         </div>
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">📊</div>
             <div class="kpi-label">MTTR</div>
-            <div class="kpi-value">{summary['mttr']*60:,.1f}</div>
+            <div class="kpi-value">{mttr:,.1f}</div>
             <div class="kpi-subtitle">menit/kejadian</div>
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">✅</div>
+            <div class="kpi-label">Availability</div>
+            <div class="kpi-value">{availability:.1f}%</div>
+            <div class="kpi-subtitle">uptime</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #8b5cf6;">
             <div class="kpi-icon">📈</div>
             <div class="kpi-label">Incident Rate</div>
             <div class="kpi-value">{incident_rate:,.1f}</div>
             <div class="kpi-subtitle">per hari</div>
         </div>
-        <div class="kpi-card" style="--card-accent: #8b5cf6;">
+        <div class="kpi-card" style="--card-accent: #06b6d4;">
             <div class="kpi-icon">🔧</div>
             <div class="kpi-label">Alat Terdampak</div>
-            <div class="kpi-value">{summary['total_alat']}</div>
+            <div class="kpi-value">{total_alat}</div>
             <div class="kpi-subtitle">unit</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # ===== PARETO & KELOMPOK MASALAH =====
+    # Filter info
+    st.markdown(f"""
+    <p style="color:#64748b; font-size:0.85rem; margin:0.5rem 0 1.5rem 0; text-align:center;">
+        📅 <strong>Periode:</strong> {start_date.strftime('%Y-%m-%d')} - {end_date.strftime('%Y-%m-%d')} ({total_days} hari) • 
+        📋 <strong>{len(df_filtered):,}</strong> dari {len(df):,} kejadian
+    </p>
+    """, unsafe_allow_html=True)
+    
+    # ===== TREND CHART =====
     st.markdown("""
     <div class="section-divider">
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">Analisis Pareto</span>
-        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📊 Pareto Chart - Top 10 Gangguan</span><span class="chart-badge">80/20 Rule</span></div></div>', unsafe_allow_html=True)
-        
-        # Pareto data
-        gangguan_count = df_filtered.groupby('Gangguan').agg({
-            'Durasi': ['count', 'sum']
-        }).reset_index()
-        gangguan_count.columns = ['Gangguan', 'Frekuensi', 'Total_Durasi']
-        gangguan_count = gangguan_count.sort_values('Frekuensi', ascending=False).head(10)
-        
-        # Calculate cumulative percentage
-        total = gangguan_count['Frekuensi'].sum()
-        gangguan_count['Cumulative'] = gangguan_count['Frekuensi'].cumsum() / total * 100
-        
-        # Create Pareto chart
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        
-        fig.add_trace(
-            go.Bar(
-                x=gangguan_count['Gangguan'],
-                y=gangguan_count['Frekuensi'],
-                name='Frekuensi',
-                marker_color='#ef4444',
-                hovertemplate='<b>%{x}</b><br>Frekuensi: %{y:,}<extra></extra>'
-            ),
-            secondary_y=False
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=gangguan_count['Gangguan'],
-                y=gangguan_count['Cumulative'],
-                name='Kumulatif %',
-                line=dict(color='#d4a84b', width=3),
-                mode='lines+markers',
-                marker=dict(size=8),
-                hovertemplate='<b>%{x}</b><br>Kumulatif: %{y:.1f}%<extra></extra>'
-            ),
-            secondary_y=True
-        )
-        
-        # Add 80% line
-        fig.add_hline(y=80, line_dash="dash", line_color="#64748b", 
-                      annotation_text="80%", secondary_y=True)
-        
-        fig.update_layout(**get_chart_layout(height=380))
-        fig.update_xaxes(tickangle=45)
-        fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
-        fig.update_yaxes(title_text="Kumulatif %", secondary_y=True, 
-                         gridcolor='rgba(30,58,95,0.3)', range=[0, 105])
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with col2:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📂 Kelompok Masalah</span></div></div>', unsafe_allow_html=True)
-        
-        kelompok_data = df_filtered.groupby('Kelompok Masalah')['Durasi'].agg(['count', 'sum']).reset_index()
-        kelompok_data.columns = ['Kelompok', 'Frekuensi', 'Total_Durasi']
-        
-        fig = px.pie(
-            kelompok_data, 
-            values='Frekuensi', 
-            names='Kelompok', 
-            hole=0.6,
-            color_discrete_sequence=['#ef4444', '#f59e0b', '#3b82f6', '#10b981']
-        )
-        fig.update_layout(**get_chart_layout(height=380, show_legend=True))
-        fig.update_layout(legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.3,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=10)
-        ))
-        fig.update_traces(textposition='inside', textinfo='percent', textfont_size=12)
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== TREN BULANAN =====
-    st.markdown("""
-    <div class="section-divider">
+        <span class="section-divider-text">📈 Trend Gangguan Harian</span>
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">Tren Gangguan</span>
-        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">📈 Tren Bulanan - Frekuensi & Downtime</span><span class="chart-badge">Combo Chart</span></div></div>', unsafe_allow_html=True)
-    
-    # Monthly trend
-    bulan_order = ['Januari','Februari','Maret','April','Mei','Juni',
-                   'Juli','Agustus','September','Oktober','November','Desember']
-    
-    monthly = df_filtered.groupby('Bulan_Name').agg({
+    # Daily trend
+    daily = df_filtered.groupby('Tanggal').agg({
         'Durasi': ['count', 'sum']
     }).reset_index()
-    monthly.columns = ['Bulan', 'Frekuensi', 'Total_Downtime']
-    monthly['Bulan'] = pd.Categorical(monthly['Bulan'], categories=bulan_order, ordered=True)
-    monthly = monthly.sort_values('Bulan')
+    daily.columns = ['Date', 'Frekuensi', 'Total_Downtime']
     
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
+    # Bar for frequency
     fig.add_trace(
         go.Bar(
-            x=monthly['Bulan'],
-            y=monthly['Frekuensi'],
+            x=daily['Date'],
+            y=daily['Frekuensi'],
             name='Frekuensi',
             marker_color='rgba(239,68,68,0.7)',
-            hovertemplate='<b>%{x}</b><br>Frekuensi: %{y:,}<extra></extra>'
+            hovertemplate='<b>%{x|%d %b}</b><br>Frekuensi: %{y:,}<extra></extra>'
         ),
         secondary_y=False
     )
     
+    # Line for downtime
     fig.add_trace(
         go.Scatter(
-            x=monthly['Bulan'],
-            y=monthly['Total_Downtime'],
-            name='Total Downtime (jam)',
-            line=dict(color='#d4a84b', width=3),
+            x=daily['Date'],
+            y=daily['Total_Downtime'],
+            name='Downtime (jam)',
+            line=dict(color='#d4a84b', width=2),
             mode='lines+markers',
-            marker=dict(size=8),
-            hovertemplate='<b>%{x}</b><br>Downtime: %{y:,.1f} jam<extra></extra>'
+            marker=dict(size=4),
+            hovertemplate='Downtime: %{y:.1f} jam<extra></extra>'
         ),
         secondary_y=True
     )
     
     fig.update_layout(**get_chart_layout(height=350))
-    fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False, title_font=dict(color='#ef4444'))
-    fig.update_yaxes(title_text="Downtime (jam)", secondary_y=True, gridcolor='rgba(30,58,95,0.3)', title_font=dict(color='#d4a84b'))
+    fig.update_xaxes(tickformat='%d %b', gridcolor='rgba(255,255,255,0.05)')
+    fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
+    fig.update_yaxes(title_text="Downtime (jam)", secondary_y=True, gridcolor='rgba(30,58,95,0.3)')
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
-    # ===== TOP ALAT & SHIFT ANALYSIS =====
+    # ===== ANALYSIS SECTION =====
     st.markdown("""
     <div class="section-divider">
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">Analisis Detail</span>
-        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔧 Top 10 Alat Bermasalah</span></div></div>', unsafe_allow_html=True)
-        
-        alat_data = df_filtered.groupby('Alat')['Durasi'].agg(['count', 'sum']).reset_index()
-        alat_data.columns = ['Alat', 'Frekuensi', 'Total_Durasi']
-        alat_data = alat_data.sort_values('Frekuensi', ascending=True).tail(10)
-        
-        fig = px.bar(
-            alat_data,
-            x='Frekuensi',
-            y='Alat',
-            orientation='h',
-            color='Frekuensi',
-            color_continuous_scale=[[0, '#1e3a5f'], [0.5, '#ef4444'], [1, '#fbbf24']]
-        )
-        fig.update_layout(**get_chart_layout(height=320, show_legend=False))
-        fig.update_coloraxes(showscale=False)
-        fig.update_traces(hovertemplate='<b>%{y}</b><br>Frekuensi: %{x:,}<extra></extra>')
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with c2:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔄 Distribusi per Shift</span></div></div>', unsafe_allow_html=True)
-        
-        shift_data = df_filtered.groupby('Shift')['Durasi'].agg(['count', 'sum']).reset_index()
-        shift_data.columns = ['Shift', 'Frekuensi', 'Total_Durasi']
-        shift_data['Shift'] = shift_data['Shift'].astype(int).astype(str)
-        shift_data['Shift'] = 'Shift ' + shift_data['Shift']
-        
-        fig = px.pie(
-            shift_data,
-            values='Frekuensi',
-            names='Shift',
-            hole=0.6,
-            color_discrete_sequence=CHART_SEQUENCE[:3]
-        )
-        fig.update_layout(**get_chart_layout(height=320, show_legend=False))
-        fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=12)
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with c3:
-        st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">⏱️ Downtime per Kelompok</span></div></div>', unsafe_allow_html=True)
-        
-        downtime_data = df_filtered.groupby('Kelompok Masalah')['Durasi'].sum().reset_index()
-        downtime_data.columns = ['Kelompok', 'Total_Durasi']
-        downtime_data = downtime_data.sort_values('Total_Durasi', ascending=True)
-        
-        fig = px.bar(
-            downtime_data,
-            x='Total_Durasi',
-            y='Kelompok',
-            orientation='h',
-            color='Total_Durasi',
-            color_continuous_scale=[[0, '#1e3a5f'], [0.5, '#f59e0b'], [1, '#ef4444']]
-        )
-        fig.update_layout(**get_chart_layout(height=320, show_legend=False))
-        fig.update_coloraxes(showscale=False)
-        fig.update_traces(hovertemplate='<b>%{y}</b><br>Downtime: %{x:,.1f} jam<extra></extra>')
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== HEATMAP =====
-    st.markdown("""
-    <div class="section-divider">
+        <span class="section-divider-text">📊 Analisis Gangguan</span>
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">Pola Gangguan</span>
-        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div class="chart-container"><div class="chart-header"><span class="chart-title">🔥 Heatmap Shift × Bulan</span><span class="chart-badge">Pattern Analysis</span></div></div>', unsafe_allow_html=True)
+    tab1, tab2, tab3 = st.tabs(["📊 Pareto Analysis", "🔧 Per Alat", "🔄 Per Shift"])
     
-    # Create pivot for heatmap
-    heatmap_data = df_filtered.copy()
-    heatmap_data['Shift'] = 'Shift ' + heatmap_data['Shift'].astype(int).astype(str)
+    with tab1:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(239, 68, 68, 0.3);">
+                <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">📊 Pareto Chart - Top 10 Gangguan</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Pareto data
+            gangguan_count = df_filtered.groupby('Gangguan').agg({
+                'Durasi': ['count', 'sum']
+            }).reset_index()
+            gangguan_count.columns = ['Gangguan', 'Frekuensi', 'Total_Durasi']
+            gangguan_count = gangguan_count.sort_values('Frekuensi', ascending=False).head(10)
+            
+            # Calculate cumulative percentage
+            total = gangguan_count['Frekuensi'].sum()
+            gangguan_count['Cumulative'] = gangguan_count['Frekuensi'].cumsum() / total * 100 if total > 0 else 0
+            
+            # Create Pareto chart
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            fig.add_trace(
+                go.Bar(
+                    x=gangguan_count['Gangguan'],
+                    y=gangguan_count['Frekuensi'],
+                    name='Frekuensi',
+                    marker_color='#ef4444',
+                    hovertemplate='<b>%{x}</b><br>Frekuensi: %{y:,}<extra></extra>'
+                ),
+                secondary_y=False
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=gangguan_count['Gangguan'],
+                    y=gangguan_count['Cumulative'],
+                    name='Kumulatif %',
+                    line=dict(color='#d4a84b', width=3),
+                    mode='lines+markers',
+                    marker=dict(size=8),
+                    hovertemplate='Kumulatif: %{y:.1f}%<extra></extra>'
+                ),
+                secondary_y=True
+            )
+            
+            # Add 80% line
+            fig.add_hline(y=80, line_dash="dash", line_color="#64748b", 
+                          annotation_text="80%", secondary_y=True)
+            
+            fig.update_layout(**get_chart_layout(height=350))
+            fig.update_xaxes(tickangle=45)
+            fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
+            fig.update_yaxes(title_text="Kumulatif %", secondary_y=True, 
+                             gridcolor='rgba(30,58,95,0.3)', range=[0, 105])
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        
+        with col2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(59, 130, 246, 0.3);">
+                <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">📂 Kelompok Masalah</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            kelompok_data = df_filtered.groupby('Kelompok Masalah')['Durasi'].agg(['count', 'sum']).reset_index()
+            kelompok_data.columns = ['Kelompok', 'Frekuensi', 'Total_Durasi']
+            
+            fig = px.pie(
+                kelompok_data, 
+                values='Frekuensi', 
+                names='Kelompok', 
+                hole=0.6,
+                color_discrete_sequence=CHART_SEQUENCE
+            )
+            fig.update_layout(**get_chart_layout(height=350, show_legend=False))
+            fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11,
+                            hovertemplate='<b>%{label}</b><br>Frekuensi: %{value:,}<br>%{percent}<extra></extra>')
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            
+            # Table
+            st.dataframe(
+                kelompok_data.sort_values('Frekuensi', ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                height=150
+            )
     
-    pivot = heatmap_data.pivot_table(
-        values='Durasi', 
-        index='Shift', 
-        columns='Bulan_Name', 
-        aggfunc='count', 
-        fill_value=0
-    )
+    with tab2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(16, 185, 129, 0.3);">
+                <h4 style="color: #10b981; margin: 0; font-size: 0.9rem;">🔧 Top 10 Alat - Frekuensi</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            alat_data = df_filtered.groupby('Alat')['Durasi'].agg(['count', 'sum']).reset_index()
+            alat_data.columns = ['Alat', 'Frekuensi', 'Total_Durasi']
+            alat_data = alat_data.sort_values('Frekuensi', ascending=True).tail(10)
+            
+            fig = px.bar(
+                alat_data,
+                x='Frekuensi',
+                y='Alat',
+                orientation='h',
+                color='Frekuensi',
+                color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']]
+            )
+            fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+            fig.update_coloraxes(showscale=False)
+            fig.update_traces(hovertemplate='<b>%{y}</b><br>Frekuensi: %{x:,}<extra></extra>')
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        
+        with col2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(245, 158, 11, 0.3);">
+                <h4 style="color: #f59e0b; margin: 0; font-size: 0.9rem;">⏱️ Top 10 Alat - Downtime</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            alat_downtime = df_filtered.groupby('Alat')['Durasi'].sum().reset_index()
+            alat_downtime.columns = ['Alat', 'Total_Durasi']
+            alat_downtime = alat_downtime.sort_values('Total_Durasi', ascending=True).tail(10)
+            
+            fig = px.bar(
+                alat_downtime,
+                x='Total_Durasi',
+                y='Alat',
+                orientation='h',
+                color='Total_Durasi',
+                color_continuous_scale=[[0, '#1e3a5f'], [1, '#f59e0b']]
+            )
+            fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+            fig.update_coloraxes(showscale=False)
+            fig.update_traces(hovertemplate='<b>%{y}</b><br>Downtime: %{x:,.1f} jam<extra></extra>')
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
-    # Reorder columns
-    cols_order = [c for c in bulan_order if c in pivot.columns]
-    pivot = pivot[cols_order]
-    
-    fig = px.imshow(
-        pivot,
-        color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#ef4444'], [1, '#fbbf24']],
-        aspect='auto',
-        labels=dict(x="Bulan", y="Shift", color="Frekuensi")
-    )
-    fig.update_layout(**get_chart_layout(height=250, show_legend=False))
-    fig.update_xaxes(tickangle=45)
-    
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    with tab3:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(59, 130, 246, 0.3);">
+                <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">🔄 Distribusi per Shift</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            shift_data = df_filtered.groupby('Shift')['Durasi'].agg(['count', 'sum']).reset_index()
+            shift_data.columns = ['Shift', 'Frekuensi', 'Total_Durasi']
+            shift_data['Shift'] = 'Shift ' + shift_data['Shift'].astype(int).astype(str)
+            
+            fig = px.bar(
+                shift_data,
+                x='Shift',
+                y='Frekuensi',
+                color='Shift',
+                text=shift_data['Frekuensi'].apply(lambda x: f'{x:,}'),
+                color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
+            )
+            fig.update_layout(**get_chart_layout(height=300, show_legend=False))
+            fig.update_traces(textposition='outside')
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        
+        with col2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(139, 92, 246, 0.3);">
+                <h4 style="color: #8b5cf6; margin: 0; font-size: 0.9rem;">⏱️ Downtime per Shift</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            fig = px.bar(
+                shift_data,
+                x='Shift',
+                y='Total_Durasi',
+                color='Shift',
+                text=shift_data['Total_Durasi'].apply(lambda x: f'{x:,.1f}'),
+                color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
+            )
+            fig.update_layout(**get_chart_layout(height=300, show_legend=False))
+            fig.update_traces(textposition='outside')
+            fig.update_yaxes(title_text='Downtime (jam)')
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        
+        # Separator
+        st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;'>", unsafe_allow_html=True)
+        
+        # Heatmap
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                    border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                    border: 1px solid rgba(239, 68, 68, 0.3);">
+            <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">🔥 Heatmap: Shift × Kelompok Masalah</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        heatmap_data = df_filtered.copy()
+        heatmap_data['Shift'] = 'Shift ' + heatmap_data['Shift'].astype(int).astype(str)
+        
+        pivot = heatmap_data.pivot_table(
+            values='Durasi', 
+            index='Shift', 
+            columns='Kelompok Masalah', 
+            aggfunc='count', 
+            fill_value=0
+        )
+        
+        if not pivot.empty:
+            fig = px.imshow(
+                pivot,
+                color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#ef4444'], [1, '#fbbf24']],
+                aspect='auto',
+                text_auto=True
+            )
+            fig.update_layout(**get_chart_layout(height=250, show_legend=False))
+            fig.update_traces(textfont=dict(size=12, color='white'))
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     # ===== DATA TABLE =====
     st.markdown("""
     <div class="section-divider">
         <div class="section-divider-line"></div>
-        <span class="section-divider-text">Data Detail</span>
-        <div class="section-divider-line" style="background: linear-gradient(90deg, transparent 0%, #1e3a5f 100%);"></div>
+        <span class="section-divider-text">📋 DATA DETAIL</span>
+        <div class="section-divider-line"></div>
     </div>
     """, unsafe_allow_html=True)
     
-    col_dl, col_btn = st.columns([4, 1])
+    # Summary bar
+    st.markdown(f"""
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:0.75rem 1rem; 
+                background:linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); border-radius:8px; margin-bottom:1rem;
+                border: 1px solid rgba(100,116,139,0.3);">
+        <span style="color:#94a3b8;">Total Records: <strong style="color:#ef4444;">{len(df_filtered):,}</strong></span>
+        <span style="color:#94a3b8;">Total Downtime: <strong style="color:#f59e0b;">{total_downtime:,.1f} jam</strong></span>
+        <span style="color:#94a3b8;">Avg/Kejadian: <strong style="color:#3b82f6;">{(total_downtime/max(total_incidents,1)*60):,.1f} menit</strong></span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_spacer, col_btn = st.columns([5, 1])
     with col_btn:
-        # Kolom untuk export - sesuai dengan sheet All
+        # Export all columns from Excel (including Crusher from Nov 2025)
+        import io
+        buffer = io.BytesIO()
         cols_export = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 
-                       'Durasi', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
-                       'Info CCR', 'Keterangan']
-        cols_export = [c for c in cols_export if c in df_filtered.columns]
-        csv = df_filtered[cols_export].to_csv(index=False)
+                       'Durasi', 'Crusher', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
+                       'Info CCR']
+        # Prepare data for export
+        # User requested: "dari tanggal yang terlama ke tanggal yang terbaru" (Ascending)
+        # Fix for TypeError: Create temp columns with enforced types for sorting
+        
+        try:
+            df_for_sort = df_filtered.copy()
+            # Create explicit sort columns
+            df_for_sort['__sort_date'] = pd.to_datetime(df_for_sort['Tanggal'], errors='coerce')
+            df_for_sort['__sort_start'] = df_for_sort['Start'].astype(str)
+            
+            # Sort
+            df_sorted = df_for_sort.sort_values(by=['__sort_date', '__sort_start'], ascending=[True, True])
+        except Exception as e:
+            # Fallback: Sort by index if specific sort fails
+            st.error(f"Sorting error (fallback used): {e}")
+            df_sorted = df_filtered.sort_index(ascending=True).copy()
+            
+        df_export = df_sorted[cols_export].copy()
+        
+        # Format Date to DD/MM/YYYY
+        if 'Tanggal' in df_export.columns:
+            df_export['Tanggal'] = pd.to_datetime(df_export['Tanggal']).apply(lambda x: x.strftime('%d/%m/%Y') if pd.notnull(x) else '')
+            
+        # Format Duration to 2 decimal places
+        if 'Durasi' in df_export.columns:
+            df_export['Durasi'] = df_export['Durasi'].round(2)
+            
+        # Ensure Start and End are properly formatted strings
+        for col in ['Start', 'End']:
+            if col in df_export.columns:
+                df_export[col] = df_export[col].astype(str)
+
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_export.to_excel(writer, index=False, sheet_name='Gangguan')
+            
         st.download_button(
-            "📥 Export CSV",
-            csv,
-            "gangguan_filtered.csv",
-            "text/csv",
+            label="📥 Export Excel",
+            data=buffer.getvalue(),
+            file_name=f"gangguan_filtered_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
     
-    # Show dataframe - kolom sesuai sheet All
-    cols_show = ['Tanggal', 'Shift', 'Start', 'End', 'Durasi', 'Alat', 
-                 'Kelompok Masalah', 'Gangguan', 'Remarks', 'Info CCR']
+    # Show dataframe - ALL columns from Excel with exact headers (including Crusher from Nov 2025)
+    cols_show = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 
+                 'Durasi', 'Crusher', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
+                 'Info CCR']
     cols_show = [c for c in cols_show if c in df_filtered.columns]
     
     display_df = df_filtered[cols_show].copy()
@@ -428,26 +547,8 @@ def show_gangguan():
     if 'Durasi' in display_df.columns:
         display_df['Durasi'] = display_df['Durasi'].round(2)
     
-    # Format waktu Start dan End
-    if 'Start' in display_df.columns:
-        display_df['Start'] = display_df['Start'].astype(str)
-    if 'End' in display_df.columns:
-        display_df['End'] = display_df['End'].astype(str)
-    
     st.dataframe(
-        display_df.sort_values('Tanggal', ascending=False),
+        display_df.sort_index(ascending=False),
         use_container_width=True,
-        height=400,
-        column_config={
-            "Tanggal": st.column_config.TextColumn("Tanggal", width="small"),
-            "Shift": st.column_config.NumberColumn("Shift", width="small"),
-            "Start": st.column_config.TextColumn("Start", width="small"),
-            "End": st.column_config.TextColumn("End", width="small"),
-            "Durasi": st.column_config.NumberColumn("Durasi (jam)", format="%.2f", width="small"),
-            "Alat": st.column_config.TextColumn("Alat", width="small"),
-            "Kelompok Masalah": st.column_config.TextColumn("Kelompok Masalah", width="medium"),
-            "Gangguan": st.column_config.TextColumn("Gangguan", width="medium"),
-            "Remarks": st.column_config.TextColumn("Remarks", width="small"),
-            "Info CCR": st.column_config.TextColumn("Info CCR", width="large"),
-        }
+        height=450
     )

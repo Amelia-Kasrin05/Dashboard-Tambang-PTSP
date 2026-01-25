@@ -1,660 +1,885 @@
 # ============================================================
-# DAILY PLAN - Interactive Mining Grid Map
+# DAILY PLAN - Interactive Mining Map Visualization
 # ============================================================
-# VERSION: 1.0 - Peta Grid Interaktif dengan Data dari Excel OneDrive
+# Displays daily plan from Excel with excavator positions on satellite map
+# Layout matches reference image: map + data table + legend
 
 import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
-from PIL import Image
-import os
+import pandas as pd
 from datetime import datetime, timedelta
+import os
 import base64
+from PIL import Image
 
-# Import dari config
+# Import grid coordinates
 try:
-    from config import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
+    from config.grid_coords import get_grid_position, get_zone_color, MAP_WIDTH, MAP_HEIGHT
 except ImportError:
-    try:
-        from config.onedrive import ONEDRIVE_LINKS, CACHE_TTL, LOCAL_FILE_NAMES
-    except ImportError:
-        ONEDRIVE_LINKS = {}
-        CACHE_TTL = 30
-        LOCAL_FILE_NAMES = {}
+    MAP_WIDTH, MAP_HEIGHT = 1400, 990
+    def get_grid_position(g, b=None): return None
+    def get_zone_color(b): return '#00BFFF'
 
-# Import helper dari data_loader
+# Import data loader as fallback
 try:
-    from utils.data_loader import download_from_onedrive, load_from_local
+    from utils.data_loader import load_daily_plan as load_daily_plan_fallback
 except ImportError:
-    # Fallback functions jika import gagal
-    def download_from_onedrive(link, timeout=30):
-        return None
-    def load_from_local(file_key):
-        if file_key not in LOCAL_FILE_NAMES:
-            return None
-        for file_path in LOCAL_FILE_NAMES[file_key]:
-            if os.path.exists(file_path):
-                return file_path
-        return None
+    def load_daily_plan_fallback(): return pd.DataFrame()
 
+# File paths
+ONEDRIVE_FILE = r"C:\Users\user\OneDrive\Dashboard_Tambang\DAILY_PLAN.xlsx"
+MAP_IMAGE_PATH = r"D:\Dashboard-Tambang-PTSP\assets\peta_grid_tambang_opt.jpg"
 
 # ============================================================
-# KONFIGURASI GRID PETA
+# DATA LOADER
 # ============================================================
 
-# Grid layout berdasarkan peta (A-P rows, 1-17 columns)
-GRID_ROWS = list('ABCDEFGHIJKLMNOP')  # 16 baris
-GRID_COLS = list(range(1, 18))         # 17 kolom
-
-# Warna untuk blok penambangan
-BLOCK_COLORS = {
-    'KRP': 'rgba(0, 150, 255, 0.7)',      # Biru - Karang Putih
-    'TJR': 'rgba(255, 80, 80, 0.7)',      # Merah - Tajarang  
-    'DEFAULT': 'rgba(255, 200, 0, 0.7)',  # Kuning - Default
-}
-
-# Warna untuk jenis material/keterangan
-MATERIAL_COLORS = {
-    'Batu Kapur': '#4CAF50',
-    'Silika': '#2196F3',
-    'Clay': '#FF9800',
-    'Development': '#9C27B0',
-    'Batu Kapur (Bersih)': '#66BB6A',
-    'Batu Kapur (Mix)': '#81C784',
-}
-
-# Path gambar peta (sesuaikan dengan lokasi di project Anda)
-MAP_IMAGE_PATHS = [
-    'assets/peta_grid_tambang.jpeg',
-    'assets/peta_grid_tambang.jpg',
-    'assets/peta_grid_tambang.png',
-    'peta_grid_tambang.jpeg',
-    'static/peta_grid_tambang.jpeg',
-]
-
-
-# ============================================================
-# FUNGSI LOAD DATA DAILY PLAN
-# ============================================================
-
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=5)  # Reduced TTL to force frequent reload
 def load_daily_plan_data():
-    """
-    Load data daily plan dari Excel (OneDrive atau Local)
-    Returns: DataFrame dengan data scheduling
-    """
+    """Load daily plan data from OneDrive Excel file"""
     df = None
     
-    # Try OneDrive first
-    if ONEDRIVE_LINKS.get("daily_plan"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='W22 Scheduling', header=None)
-            except Exception as e:
-                st.warning(f"Gagal load dari OneDrive: {e}")
+    # Try to read directly from OneDrive file first
+    try:
+        if os.path.exists(ONEDRIVE_FILE):
+            # Read with header=2 (row 3 contains the actual headers)
+            # CRITICAL FIX: Skip first column (column 0) which is empty/row numbers
+            # Read all columns EXCEPT the first one to prevent column misalignment
+            df = pd.read_excel(ONEDRIVE_FILE, sheet_name='W22 Scheduling', header=2, usecols=lambda x: x != 'Unnamed: 0')
+
+            
+    except PermissionError:
+        st.warning("⚠️ File Excel sedang dibuka. Silakan tutup Excel dan refresh halaman.")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error membaca file: {e}")
+        # Try fallback
+        df = load_daily_plan_fallback()
     
-    # Fallback to local
-    if df is None:
-        local_path = load_from_local("daily_plan")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='W22 Scheduling', header=None)
-            except Exception as e:
-                st.warning(f"Gagal load dari local: {e}")
+    if df is None or df.empty:
+        # Try fallback
+        df = load_daily_plan_fallback()
+        if df is not None and not df.empty:
+            # Standardize column names from fallback
+            col_mapping = {
+                'Batu Kapur': 'Batu Kapur',
+                'Alat Muat': 'Alat Muat',
+                'Alat Angkut': 'Alat Angkut'
+            }
+            df = df.rename(columns=col_mapping)
     
-    if df is None:
+    if df is None or df.empty:
         return pd.DataFrame()
     
-    # Parse data - cari baris header
-    header_row = None
-    for idx, row in df.iterrows():
-        row_values = [str(v).strip() for v in row.values if pd.notna(v)]
-        if 'Hari' in row_values or 'Tanggal' in row_values:
-            header_row = idx
-            break
-    
-    if header_row is None:
-        st.warning("Format Excel tidak dikenali")
+    try:
+        # Indonesian day names mapping
+        day_names_id = {
+            0: 'Senin',    # Monday
+            1: 'Selasa',   # Tuesday
+            2: 'Rabu',     # Wednesday
+            3: 'Kamis',    # Thursday
+            4: 'Jumat',    # Friday
+            5: 'Sabtu',    # Saturday
+            6: 'Minggu'    # Sunday
+        }
+        
+        # Parse dates first (needed for Hari conversion)
+        if 'Tanggal' in df.columns:
+            df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+        
+        # Fix Hari column - handle both string day names and datetime values
+        if 'Hari' in df.columns:
+            def convert_hari(val, tanggal_val=None):
+                """Convert Hari value to proper day name"""
+                if pd.isna(val):
+                    # If Hari is empty, derive from Tanggal
+                    if pd.notna(tanggal_val):
+                        try:
+                            return day_names_id[pd.to_datetime(tanggal_val).dayofweek]
+                        except:
+                            return ''
+                    return ''
+                
+                val_str = str(val).strip()
+                
+                # Check if it's already a valid day name
+                if val_str in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']:
+                    return val_str
+                
+                # Check if it looks like a datetime (contains date pattern)
+                if '-' in val_str and len(val_str) > 8:
+                    try:
+                        dt = pd.to_datetime(val_str)
+                        return day_names_id[dt.dayofweek]
+                    except:
+                        pass
+                
+                # Return cleaned value
+                return val_str
+            
+            # Apply conversion with Tanggal as fallback
+            if 'Tanggal' in df.columns:
+                df['Hari'] = df.apply(lambda row: convert_hari(row['Hari'], row['Tanggal']), axis=1)
+            else:
+                df['Hari'] = df['Hari'].apply(convert_hari)
+        
+        # Keep Shift as is (clean string)
+        if 'Shift' in df.columns:
+            df['Shift'] = df['Shift'].astype(str).str.strip()
+            # Remove rows where Shift is 'nan' or empty
+            df = df[df['Shift'].notna() & (df['Shift'] != 'nan') & (df['Shift'] != '')]
+        
+        # Filter valid rows (has date or equipment or grid)
+        valid_cols = ['Tanggal', 'Grid', 'Alat Muat', 'Blok']
+        mask = pd.Series(False, index=df.index)
+        for col in valid_cols:
+            if col in df.columns:
+                mask = mask | df[col].notna()
+        df = df[mask]
+        
+        # Remove header rows that got included
+        if 'Hari' in df.columns:
+            df = df[df['Hari'] != 'Hari']
+        if 'Shift' in df.columns:
+            df = df[df['Shift'] != 'Shift']
+        
+        # Reset index
+        df = df.reset_index(drop=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Error processing Daily Plan: {e}")
         return pd.DataFrame()
-    
-    # Set header
-    df.columns = df.iloc[header_row]
-    df = df.iloc[header_row + 1:].reset_index(drop=True)
-    
-    # Bersihkan nama kolom
-    df.columns = [str(col).strip() if pd.notna(col) else f'Col_{i}' 
-                  for i, col in enumerate(df.columns)]
-    
-    # Konversi tanggal
-    if 'Tanggal' in df.columns:
-        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-    
-    # Filter baris yang punya data Grid
-    if 'Grid' in df.columns:
-        df = df[df['Grid'].notna() & (df['Grid'].astype(str).str.strip() != '')]
-    
-    # Konversi Shift ke numeric
-    if 'Shift' in df.columns:
-        df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce')
-    
-    return df
 
 
-def get_available_dates(df):
-    """Ambil daftar tanggal unik dari data"""
-    if df.empty or 'Tanggal' not in df.columns:
-        return []
-    dates = df['Tanggal'].dropna().unique()
-    return sorted([pd.to_datetime(d) for d in dates])
 
-
-def get_data_for_date_shift(df, selected_date, selected_shift):
-    """Filter data berdasarkan tanggal dan shift"""
-    if df.empty:
-        return pd.DataFrame()
-    
-    mask = (df['Tanggal'].dt.date == selected_date.date())
-    if selected_shift != "Semua":
-        mask &= (df['Shift'] == int(selected_shift))
-    
-    return df[mask].copy()
+def get_image_base64(image_path):
+    """Convert image to base64 for Plotly"""
+    try:
+        with open(image_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except:
+        return None
 
 
 # ============================================================
-# FUNGSI PARSING GRID
+# MAP VISUALIZATION
 # ============================================================
 
-def parse_grid(grid_str):
+def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     """
-    Parse string grid menjadi (row, col)
-    Contoh: 'E9' -> ('E', 9), 'M10' -> ('M', 10)
-    """
-    if not grid_str or pd.isna(grid_str):
-        return None, None
-    
-    grid_str = str(grid_str).strip().upper()
-    row = ''
-    col = ''
-    
-    for char in grid_str:
-        if char.isalpha():
-            row += char
-        elif char.isdigit():
-            col += char
-    
-    if row and col:
-        try:
-            return row[0], int(col)  # Ambil huruf pertama saja
-        except:
-            return None, None
-    return None, None
-
-
-def grid_to_position(row, col):
-    """
-    Konversi grid ke posisi x, y untuk plotting
-    Berdasarkan layout peta: A=atas, P=bawah, 1=kiri, 17=kanan
-    """
-    if row not in GRID_ROWS or col not in GRID_COLS:
-        return None, None
-    
-    row_idx = GRID_ROWS.index(row)
-    col_idx = GRID_COLS.index(col)
-    
-    # Normalisasi ke 0-1
-    x = (col_idx + 0.5) / len(GRID_COLS)
-    y = 1 - (row_idx + 0.5) / len(GRID_ROWS)  # Invert karena y=0 di bawah
-    
-    return x, y
-
-
-# ============================================================
-# FUNGSI LOAD GAMBAR PETA
-# ============================================================
-
-def load_map_image():
-    """Load gambar peta sebagai background"""
-    for path in MAP_IMAGE_PATHS:
-        if os.path.exists(path):
-            try:
-                return Image.open(path)
-            except:
-                continue
-    return None
-
-
-def image_to_base64(img):
-    """Convert PIL Image ke base64 string"""
-    import io
-    buffer = io.BytesIO()
-    img.save(buffer, format='JPEG')
-    return base64.b64encode(buffer.getvalue()).decode()
-
-
-# ============================================================
-# FUNGSI BUAT PETA INTERAKTIF
-# ============================================================
-
-def create_interactive_map(df_filtered, map_image=None):
-    """
-    Buat peta interaktif dengan Plotly
-    - Background: gambar peta
-    - Overlay: grid aktif dengan info
+    Create the mining map with strict logic matching user requirements:
+    1. Filter: Must have Tanggal, Shift, Alat Muat, Alat Angkut, ROM, and (Grid or Blok)
+    2. Location: Grid > Blok. Custom: SP6 (no grid) -> Top Left, SP3 -> K3
+    3. Grouping: Same Location, Equipment, ROM -> Merge Shifts
+    4. Format: 3 lines (Equipment, Shift, ROM) in Blue Box
     """
     
+    # Get image as base64
+    img_base64 = get_image_base64(MAP_IMAGE_PATH)
+    
+    if not img_base64:
+        return None
+    
+    # Create figure
     fig = go.Figure()
     
-    # Ukuran peta
-    img_width = 1000
-    img_height = 700
-    
-    # Tambah background image jika ada
-    if map_image:
-        fig.add_layout_image(
-            dict(
-                source=map_image,
-                xref="x",
-                yref="y",
-                x=0,
-                y=1,
-                sizex=1,
-                sizey=1,
-                sizing="stretch",
-                opacity=1,
-                layer="below"
-            )
+    # Add background map image
+    fig.add_layout_image(
+        dict(
+            source=f"data:image/jpeg;base64,{img_base64}",
+            xref="x",
+            yref="y",
+            x=0,
+            y=MAP_HEIGHT,
+            sizex=MAP_WIDTH,
+            sizey=MAP_HEIGHT,
+            sizing="stretch",
+            opacity=1,
+            layer="below"
         )
+    )
     
-    # Jika tidak ada data, tampilkan peta kosong
+    # ------------------------------------------------------------
+    # 1. FILTERING DATA
+    # ------------------------------------------------------------
     if df_filtered.empty:
-        fig.add_annotation(
-            x=0.5, y=0.5,
-            text="Tidak ada data untuk tanggal/shift yang dipilih",
-            showarrow=False,
-            font=dict(size=16, color="white"),
-            bgcolor="rgba(0,0,0,0.7)",
-            borderpad=10
-        )
-    else:
-        # Group data by Grid untuk menghindari duplikasi
-        grid_data = {}
-        for _, row in df_filtered.iterrows():
-            grid = str(row.get('Grid', '')).strip()
-            if not grid:
-                continue
-            
-            parsed_row, parsed_col = parse_grid(grid)
-            if parsed_row is None:
-                continue
-            
-            key = f"{parsed_row}{parsed_col}"
-            if key not in grid_data:
-                grid_data[key] = {
-                    'row': parsed_row,
-                    'col': parsed_col,
-                    'blok': row.get('Blok', 'DEFAULT'),
-                    'alat_muat': [],
-                    'alat_angkut': [],
-                    'rom': [],
-                    'keterangan': [],
-                    'shift': []
-                }
-            
-            # Append data
-            if pd.notna(row.get('Alat Muat')):
-                grid_data[key]['alat_muat'].append(str(row['Alat Muat']))
-            if pd.notna(row.get('Alat Angkut')):
-                grid_data[key]['alat_angkut'].append(str(row['Alat Angkut']))
-            if pd.notna(row.get('ROM')):
-                grid_data[key]['rom'].append(str(row['ROM']))
-            if pd.notna(row.get('Keterangan')):
-                grid_data[key]['keterangan'].append(str(row['Keterangan']))
-            if pd.notna(row.get('Shift')):
-                grid_data[key]['shift'].append(int(row['Shift']))
-        
-        # Plot setiap grid aktif
-        for grid_key, data in grid_data.items():
-            x, y = grid_to_position(data['row'], data['col'])
-            if x is None:
-                continue
-            
-            # Tentukan warna berdasarkan blok
-            blok = str(data['blok']).upper().strip()
-            if 'KRP' in blok:
-                color = BLOCK_COLORS['KRP']
-                border_color = 'rgba(0, 100, 200, 1)'
-            elif 'TJR' in blok:
-                color = BLOCK_COLORS['TJR']
-                border_color = 'rgba(200, 50, 50, 1)'
-            else:
-                color = BLOCK_COLORS['DEFAULT']
-                border_color = 'rgba(200, 150, 0, 1)'
-            
-            # Buat hover text
-            alat_muat = ', '.join(set(data['alat_muat'])) or '-'
-            alat_angkut = ', '.join(set(data['alat_angkut'])) or '-'
-            rom = ', '.join(set(data['rom'])) or '-'
-            keterangan = ', '.join(set(data['keterangan'])) or '-'
-            shifts = ', '.join([str(s) for s in sorted(set(data['shift']))]) or '-'
-            
-            hover_text = (
-                f"<b>Grid: {grid_key}</b><br>"
-                f"Blok: {blok}<br>"
-                f"Shift: {shifts}<br>"
-                f"─────────────<br>"
-                f"Alat Muat: {alat_muat}<br>"
-                f"Alat Angkut: {alat_angkut}<br>"
-                f"ROM: {rom}<br>"
-                f"Keterangan: {keterangan}"
-            )
-            
-            # Tambah marker untuk grid
-            fig.add_trace(go.Scatter(
-                x=[x],
-                y=[y],
-                mode='markers+text',
-                marker=dict(
-                    size=35,
-                    color=color,
-                    line=dict(width=2, color=border_color),
-                    symbol='square'
-                ),
-                text=grid_key,
-                textposition='middle center',
-                textfont=dict(size=10, color='white', family='Arial Black'),
-                hovertemplate=hover_text + "<extra></extra>",
-                name=f"{blok} - {grid_key}"
-            ))
-            
-            # Tambah label alat di bawah grid
-            if data['alat_muat']:
-                label_text = data['alat_muat'][0][:6]  # Ambil 6 karakter pertama
-                fig.add_annotation(
-                    x=x, y=y - 0.04,
-                    text=f"<b>{label_text}</b>",
-                    showarrow=False,
-                    font=dict(size=8, color='white'),
-                    bgcolor='rgba(0,0,0,0.6)',
-                    borderpad=2
-                )
+        return fig
+
+    # Filter rules:
+    # - Must have: Tanggal, Shift, Alat Muat, Alat Angkut, ROM
+    # - Must have Grid OR Blok
+    mask = (
+        df_filtered['Tanggal'].notna() &
+        df_filtered['Shift'].notna() & df_filtered['Shift'].astype(str).str.strip().ne('') &
+        df_filtered['Alat Muat'].notna() &
+        df_filtered['Alat Angkut'].notna() &
+        df_filtered['ROM'].notna() &
+        (df_filtered['Grid'].notna() | df_filtered['Blok'].notna())
+    )
+    df_map = df_filtered[mask].copy()
     
-    # Layout
+    if df_map.empty:
+        return fig
+
+    # ------------------------------------------------------------
+    # 2. DETERMINE LOCATION ID (MAPPING)
+    # ------------------------------------------------------------
+    def resolve_location_id(row):
+        grid = str(row['Grid']).strip() if pd.notna(row['Grid']) else ''
+        blok = str(row['Blok']).strip().upper() if pd.notna(row['Blok']) else ''
+        
+        # Rule: Jika Grid terisi -> lokasi_id = Grid
+        if grid and grid.lower() != 'nan':
+            return grid
+        
+        # Rule: Jika Grid kosong dan Blok terisi -> lokasi_id = Blok
+        if blok and blok.lower() != 'nan':
+            # Mapping Khusus: Blok SP3 -> Grid K3
+            if blok == 'SP3':
+                return 'K3'
+            return blok
+        
+        return None
+
+    df_map['lokasi_id'] = df_map.apply(resolve_location_id, axis=1)
+    # Remove rows where location couldn't be resolved
+    df_map = df_map[df_map['lokasi_id'].notna()]
+
+    # ------------------------------------------------------------
+    # 3. GROUPING
+    # ------------------------------------------------------------
+    # Gabungkan baris jika sama pada: Tanggal, lokasi_id, Alat Muat, Alat Angkut, ROM
+    # (Note: Filter Tanggal already applied upstream or in mask, assuming df_filtered is usually single day or we group by date too)
+    
+    # Group fields
+    group_cols = ['lokasi_id', 'Alat Muat', 'Alat Angkut', 'ROM']
+    if 'Tanggal' in df_map.columns:
+         group_cols.insert(0, 'Tanggal')
+
+    # Aggregation: Shift -> Combine unique sorted
+    grouped = df_map.groupby(group_cols)['Shift'].unique().reset_index()
+
+    # ------------------------------------------------------------
+    # 4. PLOTTING & FORMATTING
+    # ------------------------------------------------------------
+    
+    # Track offset for collision handling
+    # Key: "x_y" -> count
+    offset_counter = {}
+
+    for _, row in grouped.iterrows():
+        loc_id = row['lokasi_id']
+        alat_muat = row['Alat Muat']
+        alat_angkut = row['Alat Angkut']
+        rom = row['ROM']
+        shifts = row['Shift']
+        
+        # Get Coordinates
+        x, y = None, None
+        
+        if loc_id == 'SP6':
+            # Move SP6 slightly inward so label doesn't get cut off
+            x, y = 140, 100 
+        else:
+            # Use standard mapping
+            pos = get_grid_position(loc_id)
+            if pos:
+                x, y = pos
+        
+        if x is None or y is None:
+            continue
+            
+        # Flip Y for plotting
+        y_plot = MAP_HEIGHT - y
+        
+        # Format Text
+        # Line 1: <Alat Muat> + <Alat Angkut>
+        line1 = f"<b>{alat_muat} + {alat_angkut}</b>"
+        
+        # Line 2: Shift <hasil gabungan>
+        try:
+            sorted_shifts = sorted(shifts, key=lambda x: int(str(x)) if str(x).isdigit() else str(x))
+        except:
+            sorted_shifts = sorted(shifts.astype(str))
+            
+        shift_str = " & ".join([str(s) for s in sorted_shifts])
+        line2 = f"Shift {shift_str}"
+        
+        # Line 3: LS> <ROM>
+        line3 = f"LS> {rom}"
+        
+        # Combined Box Text
+        box_text = f"{line1}<br>{line2}<br>{line3}"
+        
+        # --------------------------------------------------------
+        # NATURAL OFFSET LOGIC WITH BOUNDARY CLAMPING
+        # --------------------------------------------------------
+        
+        target_x, target_y = x, y_plot
+        
+        # Determine Direction preference
+        # If very close to left edge (x < 150), force RIGHT
+        # If very close to right edge (x > width-150), force LEFT
+        if x < 150: direction = 1
+        elif x > MAP_WIDTH - 150: direction = -1
+        else: direction = -1 if x < 700 else 1
+        
+        # Calculate Label Position
+        offset_dist = 160
+        label_x = x + (direction * offset_dist)
+        
+        # CLAMP X to be inside map (Buffer 80px form edge)
+        if label_x < 80: label_x = 80
+        if label_x > MAP_WIDTH - 80: label_x = MAP_WIDTH - 80
+        
+        # Vertical Stacking Logic
+        y_bucket = round(y_plot / 50) * 50
+        y_key = f"{direction}_{y_bucket}"
+        
+        offset_counter[y_key] = offset_counter.get(y_key, 0) + 1
+        stack_idx = offset_counter[y_key] - 1
+        
+        # Default Y behavior
+        label_y = y_plot - (stack_idx * 55)
+        
+        # SPECIAL HANDLING FOR CORNERS (e.g. SP6 Top Left)
+        # If point is high up (y_plot near 0 or MAP_HEIGHT), force label inward
+        # In Plotly, Y=0 is bottom, Y=MAP_HEIGHT is top.
+        # But we flipped y_plot = MAP_HEIGHT - y. 
+        # So Top Left point (x=50, y=50) -> y_plot = ~1400.
+        
+        if y_plot > MAP_HEIGHT - 100: # Very close to TOP
+             # Force label DOWN
+             label_y = y_plot - 80 - (stack_idx * 55)
+             
+        # Clamp Y
+        if label_y < 50: label_y = 50
+        if label_y > MAP_HEIGHT - 50: label_y = MAP_HEIGHT - 50
+        
+        # Elbow Path construction
+        elbow_x = x + (direction * 40) # Short stub
+        
+        # Path: Dot -> Stub -> Vertical -> Label
+        path_svg = f"M {target_x},{target_y} L {elbow_x},{target_y} L {elbow_x},{label_y} L {label_x},{label_y}"
+        
+        # Draw Elbow Line (Blue)
+        fig.add_shape(
+            type="path",
+            path=path_svg,
+            line=dict(color='#00BFFF', width=2),
+            layer="above"
+        )
+        
+        # Add Annotation Box
+        fig.add_annotation(
+            x=label_x,
+            y=label_y, 
+            text=box_text,
+            showarrow=False, 
+            bgcolor='#00BFFF', 
+            bordercolor='white',
+            borderwidth=1,
+            borderpad=4,
+            font=dict(size=9, color='black', family='Arial, sans-serif'),
+            opacity=1.0, 
+            align='center',
+            captureevents=True,
+            width=110
+        )
+        
+        # Add Marker Dot
+        fig.add_trace(go.Scatter(
+            x=[target_x],
+            y=[target_y],
+            mode='markers',
+            marker=dict(size=10, color='#00BFFF', line=dict(color='white', width=2)),
+            hoverinfo='skip',
+            showlegend=False
+        ))
+    
+    # Configure layout
     fig.update_layout(
-        title=dict(
-            text="",
-            x=0.5,
-            font=dict(size=16)
-        ),
-        xaxis=dict(
-            range=[0, 1],
-            showgrid=False,
-            zeroline=False,
-            showticklabels=False,
-            fixedrange=True
-        ),
-        yaxis=dict(
-            range=[0, 1],
-            showgrid=False,
-            zeroline=False,
-            showticklabels=False,
-            scaleanchor="x",
-            scaleratio=0.7,
-            fixedrange=True
-        ),
-        showlegend=False,
-        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(range=[-20, MAP_WIDTH + 20], showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(range=[-20, MAP_HEIGHT + 20], showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=1),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=1000,
+        template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        height=600,
-        hoverlabel=dict(
-            bgcolor="rgba(0,0,0,0.8)",
-            font_size=12,
-            font_family="Arial"
-        )
+        dragmode='pan'
     )
     
     return fig
 
 
-# ============================================================
-# FUNGSI BUAT TABEL RINGKASAN
-# ============================================================
-
-def create_summary_table(df_filtered):
-    """Buat tabel ringkasan aktivitas"""
-    if df_filtered.empty:
-        return None
+def create_data_table(df_filtered):
+    """Create data table with ALL columns from Excel"""
+    # Only keep relevant columns and formatting
+    cols = ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan']
+    # Filter columns that exist
+    cols = [c for c in cols if c in df_filtered.columns]
     
-    # Kolom yang ditampilkan
-    display_cols = ['Shift', 'Blok', 'Grid', 'Alat Muat', 'Alat Angkut', 'ROM', 'Keterangan']
-    available_cols = [c for c in display_cols if c in df_filtered.columns]
+    display_df = df_filtered[cols].copy()
     
-    if not available_cols:
-        return None
-    
-    return df_filtered[available_cols].fillna('-')
+    # Format date
+    if 'Tanggal' in display_df.columns:
+        display_df['Tanggal'] = pd.to_datetime(display_df['Tanggal']).dt.strftime('%d-%m-%Y')
+        
+    return display_df
 
 
+def show_daily_plan():
+    # ... header setup ...
+    st.markdown("""
+    <style>
+    .date-header {
+        font-size: 24px;
+        font-weight: bold;
+        color: white;
+        text-align: center;
+        background: #1a1a2e;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        border: 1px solid #333;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    active_filters = {}
+    
+    # Load data
+    df = load_daily_plan_data()
+    if df is None:
+        st.error("Gagal memuat data Daily Plan.")
+        return
+
+    # Sidebar Filters (Re-integrated cleanly if needed, assuming existing code handles it)
+    # ...
+    
+    # Processing Logic (Simplified for replacement context)
+    # ...
+    # Assume we have filtered df -> df_filtered, selected_date, selected_shifts etc.
+    
+    # For replacement, we need to match the View rendering block
+    
+    return # Placeholder
+
+
+
 # ============================================================
-# FUNGSI UTAMA - SHOW DAILY PLAN
+# DATA TABLE
+# ============================================================
+# ... (create_data_table function stays same) ...
+
+
+# ============================================================
+# MAIN VIEW
 # ============================================================
 
 def show_daily_plan():
-    """Render halaman Daily Plan dengan peta interaktif"""
+    # ... (header code same) ... 
     
-    # Header
+    # Load data
+    df = load_daily_plan_data()
+    # ... (error handling same) ...
+    
+    # ... (header html removed or kept minimal) ...
     st.markdown("""
-    <div class="page-header">
-        <div class="page-header-icon">🗺️</div>
-        <div class="page-header-text">
-            <h1>Daily Plan - Peta Grid Tambang</h1>
-            <p>Visualisasi rencana harian penambangan per grid</p>
-        </div>
+    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                padding: 20px; border-radius: 12px; margin-bottom: 20px;
+                border-left: 4px solid #00D4FF;">
+        <h1 style="margin: 0; color: white; font-size: 28px;">
+            🗺️ Daily Plan - Peta Penambangan
+        </h1>
     </div>
     """, unsafe_allow_html=True)
     
+    # ... (filters code same) ... (omitted for brevity, assume filters exist)
+    # Re-inserting filters section and processing logic would be huge diff
+    # I will focus replacing the MAP DISPLAY part below
+    
+    # ... (apply filters logic same) ...
+
+
+
+# ============================================================
+# DATA TABLE
+# ============================================================
+
+def create_data_table(df_filtered):
+    """Create data table with ALL columns from Excel"""
+    if df_filtered.empty:
+        return pd.DataFrame()
+    
+    # Show ALL relevant columns from Excel (using exact Excel column names)
+    cols_to_show = ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay',
+                    'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan']
+    
+    # Only include columns that exist in dataframe
+    available_cols = [col for col in cols_to_show if col in df_filtered.columns]
+    display_df = df_filtered[available_cols].copy()
+    
+    # Format Tanggal if present
+    if 'Tanggal' in display_df.columns:
+        display_df['Tanggal'] = pd.to_datetime(display_df['Tanggal'], errors='coerce').dt.strftime('%Y-%m-%d')
+    
+    # Format numerical columns
+    for col in ['Batu Kapur', 'Silika', 'Clay']:
+        if col in display_df.columns:
+            # Convert to numeric and format
+            display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
+            # Replace NaN with empty string for display
+            display_df[col] = display_df[col].apply(lambda x: '' if pd.isna(x) else f'{int(x):,}' if x == int(x) else f'{x:,.1f}')
+    
+    return display_df
+
+
+# ============================================================
+# MAIN VIEW
+# ============================================================
+
+def show_daily_plan():
+    """Render Daily Plan Dashboard with professional multi-select filters"""
+    
     # Load data
-    with st.spinner("Memuat data dari Excel..."):
-        df = load_daily_plan_data()
+    df = load_daily_plan_data()
     
     if df.empty:
-        st.error("❌ Data Daily Plan tidak ditemukan. Pastikan file DAILY_PLAN.xlsx tersedia di OneDrive.")
-        st.info("""
-        **Checklist:**
-        1. File `DAILY_PLAN.xlsx` ada di folder OneDrive/Dashboard_Tambang
-        2. Sheet bernama `W22 Scheduling` 
-        3. Kolom: Hari, Tanggal, Shift, Blok, Grid, Alat Muat, Alat Angkut, ROM, Keterangan
-        """)
-        return
-    
-    # Ambil daftar tanggal
-    available_dates = get_available_dates(df)
-    
-    if not available_dates:
-        st.warning("⚠️ Tidak ada data tanggal yang valid dalam file Excel")
+        st.warning("⚠️ Data Daily Plan tidak tersedia. Pastikan file Excel tidak sedang dibuka.")
         return
     
     # ============================================================
-    # FILTER SECTION
+    # HEADER
     # ============================================================
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                padding: 20px; border-radius: 12px; margin-bottom: 20px;
+                border-left: 4px solid #00D4FF;">
+        <h1 style="margin: 0; color: white; font-size: 28px;">
+            🗺️ Daily Plan - Peta Penambangan
+        </h1>
+        <p style="margin: 5px 0 0 0; color: #B0B0B0; font-size: 14px;">
+            Visualisasi rencana harian penambangan bahan baku
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+    # DEBUG: Show data sample
+    with st.expander("🔧 Debug Info - Klik untuk lihat"):
+        st.write("**Kolom Hari (5 baris pertama):**")
+        if 'Hari' in df.columns:
+            st.write(df['Hari'].head().tolist())
+            st.write(f"Tipe data: {df['Hari'].dtype}")
+        st.write("\n**Kolom Tanggal (5 baris pertama):**")
+        if 'Tanggal' in df.columns:
+            st.write(df['Tanggal'].head().tolist())
+        st.write(f"\n**Total rows:** {len(df)}")
+        st.write(f"**Kolom:** {df.columns.tolist()}")
+
     
-    with col1:
-        # Date picker
-        min_date = min(available_dates).date()
-        max_date = max(available_dates).date()
-        selected_date = st.date_input(
-            "📅 Pilih Tanggal",
-            value=max_date,
-            min_value=min_date,
-            max_value=max_date,
-            help="Pilih tanggal untuk melihat rencana harian"
-        )
+    # ============================================================
+    # FILTERS SECTION
+    # ============================================================
+    st.markdown("""
+    <div style="background: #1a1a2e; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+        <h3 style="margin: 0 0 10px 0; color: #00D4FF; font-size: 16px;">🔍 Filter Data</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    with col2:
-        # Shift selector
-        shift_options = ["Semua", "1", "2", "3"]
-        selected_shift = st.selectbox(
-            "⏰ Shift",
+    # Get unique values for filters
+    available_dates = sorted(df['Tanggal'].dropna().dt.date.unique(), reverse=True)
+    available_shifts = sorted(df['Shift'].dropna().unique().astype(str).tolist())
+    available_blok = sorted([str(b) for b in df['Blok'].dropna().unique() if pd.notna(b)])
+    available_alat = sorted([str(a) for a in df['Alat Muat'].dropna().unique() if pd.notna(a)])
+    available_hari = sorted([str(h) for h in df['Hari'].dropna().unique() if pd.notna(h)])
+    available_grid = sorted([str(g) for g in df['Grid'].dropna().unique() if pd.notna(g)])
+    
+    # Filter row - MORE FILTERS
+    filter_cols = st.columns([2, 2, 2, 2, 1])
+    
+    with filter_cols[0]:
+        st.markdown("**📅 Tanggal**")
+        if len(available_dates) > 0:
+            selected_date = st.date_input(
+                "Tanggal",
+                value=available_dates[0],
+                min_value=min(available_dates),
+                max_value=max(available_dates),
+                key='dp_date',
+                label_visibility="collapsed"
+            )
+        else:
+            selected_date = datetime.now().date()
+    
+    with filter_cols[1]:
+        st.markdown("**⏰ Shift**")
+        shift_options = ['Semua'] + available_shifts
+        selected_shifts = st.multiselect(
+            "Shift",
             options=shift_options,
-            help="Filter berdasarkan shift"
+            default=['Semua'],
+            key='dp_shift',
+            label_visibility="collapsed"
         )
+        if len(selected_shifts) == 0:
+            selected_shifts = ['Semua']
     
-    with col3:
-        # Refresh button
-        if st.button("🔄 Refresh Data", use_container_width=True):
+    with filter_cols[2]:
+        st.markdown("**📍 Blok**")
+        blok_options = ['Semua'] + available_blok
+        selected_bloks = st.multiselect(
+            "Blok",
+            options=blok_options,
+            default=['Semua'],
+            key='dp_blok',
+            label_visibility="collapsed"
+        )
+        if len(selected_bloks) == 0:
+            selected_bloks = ['Semua']
+    
+    with filter_cols[3]:
+        st.markdown("**🚜 Alat Muat**")
+        alat_options = ['Semua'] + available_alat
+        selected_alat = st.multiselect(
+            "Alat Muat",
+            options=alat_options,
+            default=['Semua'],
+            key='dp_alat',
+            label_visibility="collapsed"
+        )
+        if len(selected_alat) == 0:
+            selected_alat = ['Semua']
+    
+    with filter_cols[4]:
+        st.markdown("**🔄 Refresh**")
+        if st.button("🔄 Refresh", use_container_width=True, key='dp_refresh'):
             st.cache_data.clear()
             st.rerun()
     
-    with col4:
-        # Info tanggal data
-        st.markdown(f"""
-        <div style="background: rgba(212,168,75,0.1); padding: 10px; border-radius: 8px; border-left: 3px solid #d4a84b;">
-            <small style="color: #94a3b8;">Data tersedia:</small><br>
-            <strong style="color: #f1f5f9;">{min_date.strftime('%d %b %Y')} - {max_date.strftime('%d %b %Y')}</strong>
-        </div>
-        """, unsafe_allow_html=True)
+    # Second row of filters
+    filter_cols2 = st.columns([2, 2, 2, 2, 2, 1])
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    with filter_cols2[0]:
+        st.markdown("**📅 Hari**")
+        hari_options = ['Semua'] + available_hari
+        selected_hari = st.multiselect(
+            "Hari",
+            options=hari_options,
+            default=['Semua'],
+            key='dp_hari',
+            label_visibility="collapsed"
+        )
+        if len(selected_hari) == 0:
+            selected_hari = ['Semua']
     
-    # ============================================================
-    # FILTER DATA
-    # ============================================================
+    with filter_cols2[1]:
+        st.markdown("**📍 Grid**")
+        grid_options = ['Semua'] + available_grid[:20]  # Limit to first 20
+        selected_grids = st.multiselect(
+            "Grid",
+            options=grid_options,
+            default=['Semua'],
+            key='dp_grid',
+            label_visibility="collapsed"
+        )
+        if len(selected_grids) == 0:
+            selected_grids = ['Semua']
     
-    selected_datetime = pd.to_datetime(selected_date)
-    df_filtered = get_data_for_date_shift(df, selected_datetime, selected_shift)
-    
-    # ============================================================
-    # KPI CARDS
-    # ============================================================
-    
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    
-    with kpi1:
-        total_grid = df_filtered['Grid'].nunique() if not df_filtered.empty else 0
-        st.markdown(f"""
-        <div class="kpi-card" style="--card-accent: #3b82f6;">
-            <div class="kpi-icon">📍</div>
-            <div class="kpi-label">Grid Aktif</div>
-            <div class="kpi-value">{total_grid}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with kpi2:
-        total_alat = df_filtered['Alat Muat'].nunique() if not df_filtered.empty and 'Alat Muat' in df_filtered.columns else 0
-        st.markdown(f"""
-        <div class="kpi-card" style="--card-accent: #10b981;">
-            <div class="kpi-icon">🚜</div>
-            <div class="kpi-label">Alat Muat</div>
-            <div class="kpi-value">{total_alat}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with kpi3:
-        krp_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper().str.contains('KRP', na=False)]) if not df_filtered.empty and 'Blok' in df_filtered.columns else 0
-        st.markdown(f"""
-        <div class="kpi-card" style="--card-accent: #3b82f6;">
-            <div class="kpi-icon">🔵</div>
-            <div class="kpi-label">Aktivitas KRP</div>
-            <div class="kpi-value">{krp_count}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with kpi4:
-        tjr_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper().str.contains('TJR', na=False)]) if not df_filtered.empty and 'Blok' in df_filtered.columns else 0
-        st.markdown(f"""
-        <div class="kpi-card" style="--card-accent: #ef4444;">
-            <div class="kpi-icon">🔴</div>
-            <div class="kpi-label">Aktivitas TJR</div>
-            <div class="kpi-value">{tjr_count}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
+    with filter_cols2[2]:
+        st.markdown("**🪨 Material**")
+        material_options = ['Semua', 'Batu Kapur', 'Silika', 'Clay']
+        selected_material = st.multiselect(
+            "Material",
+            options=material_options,
+            default=['Semua'],
+            key='dp_material',
+            label_visibility="collapsed"
+        )
     
     # ============================================================
-    # PETA DAN TABEL
+    # APPLY FILTERS
     # ============================================================
+    df_filtered = df.copy()
     
-    tab1, tab2 = st.tabs(["🗺️ Peta Grid", "📋 Tabel Detail"])
+    # Date filter
+    if 'Tanggal' in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered['Tanggal'].dt.date == selected_date]
     
-    with tab1:
+    # Shift filter
+    if selected_shifts and 'Semua' not in selected_shifts:
+        df_filtered = df_filtered[df_filtered['Shift'].astype(str).isin(selected_shifts)]
+    
+    # Blok filter
+    if selected_bloks and 'Semua' not in selected_bloks and 'Blok' in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered['Blok'].astype(str).isin(selected_bloks)]
+    
+    # Hari filter
+    if selected_hari and 'Semua' not in selected_hari and 'Hari' in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered['Hari'].astype(str).isin(selected_hari)]
+    
+    # Grid filter
+    if selected_grids and 'Semua' not in selected_grids and 'Grid' in df_filtered.columns:
+        # Convert both to string for comparison and handle potential NaNs
+        df_filtered = df_filtered[df_filtered['Grid'].fillna('').astype(str).isin(selected_grids)]
+    
+    # Alat Muat filter
+    if selected_alat and 'Semua' not in selected_alat and 'Alat Muat' in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered['Alat Muat'].astype(str).isin(selected_alat)]
+    
+    # Material filter
+    if 'Semua' not in selected_material and selected_material:
+
+        material_mask = pd.Series(False, index=df_filtered.index)
+        for mat in selected_material:
+            if mat == 'Batu Kapur' and 'Batu Kapur' in df_filtered.columns:
+                material_mask = material_mask | df_filtered['Batu Kapur'].notna()
+            elif mat == 'Silika' and 'Silika' in df_filtered.columns:
+                material_mask = material_mask | df_filtered['Silika'].notna()
+            elif mat == 'Clay' and 'Clay' in df_filtered.columns:
+                material_mask = material_mask | df_filtered['Clay'].notna()
+        df_filtered = df_filtered[material_mask]
+    
+    # ============================================================
+    # KPI METRICS
+    # ============================================================
+    st.markdown("---")
+    
+    kpi_cols = st.columns(5)
+    
+    with kpi_cols[0]:
         st.markdown("""
-        <div class="chart-container">
-            <div class="chart-header">
-                <span class="chart-title">📍 Peta Lokasi Penambangan</span>
-                <span class="chart-badge">LIVE</span>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Load gambar peta
-        map_img = load_map_image()
-        if map_img:
-            map_source = f"data:image/jpeg;base64,{image_to_base64(map_img)}"
-        else:
-            map_source = None
-            st.info("💡 Gambar peta tidak ditemukan. Letakkan file `peta_grid_tambang.jpeg` di folder `assets/`")
-        
-        # Buat peta interaktif
-        fig = create_interactive_map(df_filtered, map_source)
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        # Legend
-        st.markdown("""
-        <div style="display: flex; gap: 20px; justify-content: center; margin-top: 10px;">
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <div style="width: 20px; height: 20px; background: rgba(0,150,255,0.7); border: 2px solid rgba(0,100,200,1);"></div>
-                <span style="color: #94a3b8; font-size: 12px;">KRP (Karang Putih)</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <div style="width: 20px; height: 20px; background: rgba(255,80,80,0.7); border: 2px solid rgba(200,50,50,1);"></div>
-                <span style="color: #94a3b8; font-size: 12px;">TJR (Tajarang)</span>
-            </div>
+        <div style="background: linear-gradient(135deg, #00D4FF22, #00D4FF11); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #00D4FF44;">
+            <div style="font-size: 28px; font-weight: bold; color: #00D4FF;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Total Operasi</div>
         </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+        """.format(len(df_filtered)), unsafe_allow_html=True)
     
-    with tab2:
+    with kpi_cols[1]:
+        active_exc = df_filtered['Alat Muat'].dropna().nunique()
         st.markdown("""
-        <div class="chart-container">
-            <div class="chart-header">
-                <span class="chart-title">📋 Detail Rencana Harian</span>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        summary_df = create_summary_table(df_filtered)
-        if summary_df is not None and not summary_df.empty:
-            st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
-            
-            # Download button
-            csv = summary_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"daily_plan_{selected_date}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("Tidak ada data untuk ditampilkan")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+        <div style="background: linear-gradient(135deg, #FFD70022, #FFD70011); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #FFD70044;">
+            <div style="font-size: 28px; font-weight: bold; color: #FFD700;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Excavator Aktif</div>
+        </div>
+        """.format(active_exc), unsafe_allow_html=True)
+    
+    with kpi_cols[2]:
+        active_grids = df_filtered['Grid'].dropna().nunique()
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #00FF8822, #00FF8811); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #00FF8844;">
+            <div style="font-size: 28px; font-weight: bold; color: #00FF88;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Lokasi Aktif</div>
+        </div>
+        """.format(active_grids), unsafe_allow_html=True)
+    
+    with kpi_cols[3]:
+        krp_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper() == 'KRP']) if 'Blok' in df_filtered.columns else 0
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #00BFFF22, #00BFFF11); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #00BFFF44;">
+            <div style="font-size: 28px; font-weight: bold; color: #00BFFF;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">KRP (Kapur)</div>
+        </div>
+        """.format(krp_count), unsafe_allow_html=True)
+    
+    with kpi_cols[4]:
+        tjr_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper() == 'TJR']) if 'Blok' in df_filtered.columns else 0
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #FFA50022, #FFA50011); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #FFA50044;">
+            <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">TJR (Tajarang)</div>
+        </div>
+        """.format(tjr_count), unsafe_allow_html=True)
+    
+    st.markdown("---")
     
     # ============================================================
-    # FOOTER INFO
+    # MAIN CONTENT: FULL-WIDTH MAP ON TOP, TABLE BELOW
     # ============================================================
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ============================================================
+    # MAIN CONTENT: DATE ON LEFT, MAP ON RIGHT (MATCHING REFERENCE)
+    # ============================================================
+    
+    # Date formatting for display
+    day_names = {
+        'Monday': 'Senin', 'Tuesday': 'Selasa', 'Wednesday': 'Rabu',
+        'Thursday': 'Kamis', 'Friday': 'Jumat', 'Saturday': 'Sabtu', 'Sunday': 'Minggu'
+    }
+    month_names = {
+        1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+        7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+    }
+    
+    day_name_en = pd.Timestamp(selected_date).strftime('%A')
+    day_id = day_names.get(day_name_en, day_name_en)
+    month_id = month_names.get(selected_date.month, str(selected_date.month))
+    date_str = f"{selected_date.day} {month_id} {selected_date.year}"
+    
+    # Generate Map
+    shift_label = ', '.join(selected_shifts) if len(selected_shifts) <= 3 else f"{len(selected_shifts)} shifts"
+    fig = create_mining_map(df_filtered, pd.Timestamp(selected_date), shift_label)
+    
+    # 2-Column Layout
+    # DATE HEADER (Full Width Top)
     st.markdown(f"""
-    <div style="text-align: center; color: #64748b; font-size: 12px;">
-        Data diperbarui otomatis dari OneDrive setiap {CACHE_TTL} detik<br>
-        Klik tombol Refresh untuk memuat data terbaru
+    <div style="background: white; border-radius: 8px; padding: 15px; text-align: center; margin-bottom: 10px; border: 1px solid #ccc;">
+         <span style="font-size: 24px; font-weight: bold; color: black; margin-right: 15px;">{day_id},</span>
+         <span style="font-size: 24px; color: black;">{date_str}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # MAP (Full Width)
+    if fig:
+        st.plotly_chart(fig, use_container_width=True, config={
+            'displayModeBar': True,
+            'modeBarButtonsToRemove': ['lasso2d'], 
+            'scrollZoom': False, 
+            'displaylogo': False
+        })
+        
+        st.markdown("""
+        <div style="text-align: right; color: #666; font-size: 11px; margin-top: -5px;">
+            🔍 Gunakan tombol di atas kanan peta untuk Zoom/Pan | 📷 Ikon Kamera: Download PNG
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.info("ℹ️ Tidak ada data untuk ditampilkan pada filter yang dipilih.")
+    
+    # ============================================================
+    # TABLE SECTION (FULL WIDTH BELOW MAP)
+    # ============================================================
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                padding: 15px; border-radius: 10px; margin-bottom: 15px; margin-top: 20px;
+                border-left: 4px solid #00D4FF;">
+        <h3 style="margin: 0; color: white; font-size: 18px;">📋 Detail Rencana Operasi Harian</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if not df_filtered.empty:
+        display_df = create_data_table(df_filtered)
+        st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+    else:
+        st.info("Tidak ada data operasi untuk filter yang dipilih.")
+    
+    # Production targets (below table)
+    # ... (Keep existing target code if needed or just end here)
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; font-size: 12px;">
+        Mining Dashboard v4.0 &copy; 2025 Semen Padang
     </div>
     """, unsafe_allow_html=True)
