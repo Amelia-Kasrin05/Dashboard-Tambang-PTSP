@@ -382,5 +382,14 @@ input {color: var(--text-primary) !important;}
     background: var(--bg-card) !important;
     border-radius: 8px !important;
 }
+
+/* ===== NATIVE BORDER CONTAINER ===== */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 16px !important;
+    padding: 1.25rem !important;
+    box-shadow: var(--shadow) !important;
+}
 </style>
 """, unsafe_allow_html=True)

@@ -175,40 +175,41 @@ def show_gangguan():
     }).reset_index()
     daily.columns = ['Date', 'Frekuensi', 'Total_Downtime']
     
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    # Bar for frequency
-    fig.add_trace(
-        go.Bar(
-            x=daily['Date'],
-            y=daily['Frekuensi'],
-            name='Frekuensi',
-            marker_color='rgba(239,68,68,0.7)',
-            hovertemplate='<b>%{x|%d %b}</b><br>Frekuensi: %{y:,}<extra></extra>'
-        ),
-        secondary_y=False
-    )
-    
-    # Line for downtime
-    fig.add_trace(
-        go.Scatter(
-            x=daily['Date'],
-            y=daily['Total_Downtime'],
-            name='Downtime (jam)',
-            line=dict(color='#d4a84b', width=2),
-            mode='lines+markers',
-            marker=dict(size=4),
-            hovertemplate='Downtime: %{y:.1f} jam<extra></extra>'
-        ),
-        secondary_y=True
-    )
-    
-    fig.update_layout(**get_chart_layout(height=350))
-    fig.update_xaxes(tickformat='%d %b', gridcolor='rgba(255,255,255,0.05)')
-    fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
-    fig.update_yaxes(title_text="Downtime (jam)", secondary_y=True, gridcolor='rgba(30,58,95,0.3)')
-    
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    with st.container(border=True):
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Bar for frequency
+        fig.add_trace(
+            go.Bar(
+                x=daily['Date'],
+                y=daily['Frekuensi'],
+                name='Frekuensi',
+                marker_color='rgba(239,68,68,0.7)',
+                hovertemplate='<b>%{x|%d %b}</b><br>Frekuensi: %{y:,}<extra></extra>'
+            ),
+            secondary_y=False
+        )
+        
+        # Line for downtime
+        fig.add_trace(
+            go.Scatter(
+                x=daily['Date'],
+                y=daily['Total_Downtime'],
+                name='Downtime (jam)',
+                line=dict(color='#d4a84b', width=2),
+                mode='lines+markers',
+                marker=dict(size=4),
+                hovertemplate='Downtime: %{y:.1f} jam<extra></extra>'
+            ),
+            secondary_y=True
+        )
+        
+        fig.update_layout(**get_chart_layout(height=350))
+        fig.update_xaxes(tickformat='%d %b', gridcolor='rgba(255,255,255,0.05)')
+        fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
+        fig.update_yaxes(title_text="Downtime (jam)", secondary_y=True, gridcolor='rgba(30,58,95,0.3)')
+        
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     # ===== ANALYSIS SECTION =====
     st.markdown("""
@@ -225,240 +226,247 @@ def show_gangguan():
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(239, 68, 68, 0.3);">
-                <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">📊 Pareto Chart - Top 10 Gangguan</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Pareto data
-            gangguan_count = df_filtered.groupby('Gangguan').agg({
-                'Durasi': ['count', 'sum']
-            }).reset_index()
-            gangguan_count.columns = ['Gangguan', 'Frekuensi', 'Total_Durasi']
-            gangguan_count = gangguan_count.sort_values('Frekuensi', ascending=False).head(10)
-            
-            # Calculate cumulative percentage
-            total = gangguan_count['Frekuensi'].sum()
-            gangguan_count['Cumulative'] = gangguan_count['Frekuensi'].cumsum() / total * 100 if total > 0 else 0
-            
-            # Create Pareto chart
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            fig.add_trace(
-                go.Bar(
-                    x=gangguan_count['Gangguan'],
-                    y=gangguan_count['Frekuensi'],
-                    name='Frekuensi',
-                    marker_color='#ef4444',
-                    hovertemplate='<b>%{x}</b><br>Frekuensi: %{y:,}<extra></extra>'
-                ),
-                secondary_y=False
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=gangguan_count['Gangguan'],
-                    y=gangguan_count['Cumulative'],
-                    name='Kumulatif %',
-                    line=dict(color='#d4a84b', width=3),
-                    mode='lines+markers',
-                    marker=dict(size=8),
-                    hovertemplate='Kumulatif: %{y:.1f}%<extra></extra>'
-                ),
-                secondary_y=True
-            )
-            
-            # Add 80% line
-            fig.add_hline(y=80, line_dash="dash", line_color="#64748b", 
-                          annotation_text="80%", secondary_y=True)
-            
-            fig.update_layout(**get_chart_layout(height=350))
-            fig.update_xaxes(tickangle=45)
-            fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
-            fig.update_yaxes(title_text="Kumulatif %", secondary_y=True, 
-                             gridcolor='rgba(30,58,95,0.3)', range=[0, 105])
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(239, 68, 68, 0.3);">
+                    <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">📊 Pareto Chart - Top 10 Gangguan</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Pareto data
+                gangguan_count = df_filtered.groupby('Gangguan').agg({
+                    'Durasi': ['count', 'sum']
+                }).reset_index()
+                gangguan_count.columns = ['Gangguan', 'Frekuensi', 'Total_Durasi']
+                gangguan_count = gangguan_count.sort_values('Frekuensi', ascending=False).head(10)
+                
+                # Calculate cumulative percentage
+                total = gangguan_count['Frekuensi'].sum()
+                gangguan_count['Cumulative'] = gangguan_count['Frekuensi'].cumsum() / total * 100 if total > 0 else 0
+                
+                # Create Pareto chart
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                fig.add_trace(
+                    go.Bar(
+                        x=gangguan_count['Gangguan'],
+                        y=gangguan_count['Frekuensi'],
+                        name='Frekuensi',
+                        marker_color='#ef4444',
+                        hovertemplate='<b>%{x}</b><br>Frekuensi: %{y:,}<extra></extra>'
+                    ),
+                    secondary_y=False
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=gangguan_count['Gangguan'],
+                        y=gangguan_count['Cumulative'],
+                        name='Kumulatif %',
+                        line=dict(color='#d4a84b', width=3),
+                        mode='lines+markers',
+                        marker=dict(size=8),
+                        hovertemplate='Kumulatif: %{y:.1f}%<extra></extra>'
+                    ),
+                    secondary_y=True
+                )
+                
+                # Add 80% line
+                fig.add_hline(y=80, line_dash="dash", line_color="#64748b", 
+                              annotation_text="80%", secondary_y=True)
+                
+                fig.update_layout(**get_chart_layout(height=350))
+                fig.update_xaxes(tickangle=45)
+                fig.update_yaxes(title_text="Frekuensi", secondary_y=False, showgrid=False)
+                fig.update_yaxes(title_text="Kumulatif %", secondary_y=True, 
+                                 gridcolor='rgba(30,58,95,0.3)', range=[0, 105])
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
         with col2:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(59, 130, 246, 0.3);">
-                <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">📂 Kelompok Masalah</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            kelompok_data = df_filtered.groupby('Kelompok Masalah')['Durasi'].agg(['count', 'sum']).reset_index()
-            kelompok_data.columns = ['Kelompok', 'Frekuensi', 'Total_Durasi']
-            
-            fig = px.pie(
-                kelompok_data, 
-                values='Frekuensi', 
-                names='Kelompok', 
-                hole=0.6,
-                color_discrete_sequence=CHART_SEQUENCE
-            )
-            fig.update_layout(**get_chart_layout(height=350, show_legend=False))
-            fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11,
-                            hovertemplate='<b>%{label}</b><br>Frekuensi: %{value:,}<br>%{percent}<extra></extra>')
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-            
-            # Table
-            st.dataframe(
-                kelompok_data.sort_values('Frekuensi', ascending=False),
-                use_container_width=True,
-                hide_index=True,
-                height=150
-            )
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(59, 130, 246, 0.3);">
+                    <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">📂 Kelompok Masalah</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                kelompok_data = df_filtered.groupby('Kelompok Masalah')['Durasi'].agg(['count', 'sum']).reset_index()
+                kelompok_data.columns = ['Kelompok', 'Frekuensi', 'Total_Durasi']
+                
+                fig = px.pie(
+                    kelompok_data, 
+                    values='Frekuensi', 
+                    names='Kelompok', 
+                    hole=0.6,
+                    color_discrete_sequence=CHART_SEQUENCE
+                )
+                fig.update_layout(**get_chart_layout(height=350, show_legend=False))
+                fig.update_traces(textposition='inside', textinfo='percent', textfont_size=11,
+                                hovertemplate='<b>%{label}</b><br>Frekuensi: %{value:,}<br>%{percent}<extra></extra>')
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                
+                # Table
+                st.dataframe(
+                    kelompok_data.sort_values('Frekuensi', ascending=False),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=150
+                )
     
     with tab2:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(16, 185, 129, 0.3);">
-                <h4 style="color: #10b981; margin: 0; font-size: 0.9rem;">🔧 Top 10 Alat - Frekuensi</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            alat_data = df_filtered.groupby('Alat')['Durasi'].agg(['count', 'sum']).reset_index()
-            alat_data.columns = ['Alat', 'Frekuensi', 'Total_Durasi']
-            alat_data = alat_data.sort_values('Frekuensi', ascending=True).tail(10)
-            
-            fig = px.bar(
-                alat_data,
-                x='Frekuensi',
-                y='Alat',
-                orientation='h',
-                color='Frekuensi',
-                color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']]
-            )
-            fig.update_layout(**get_chart_layout(height=320, show_legend=False))
-            fig.update_coloraxes(showscale=False)
-            fig.update_traces(hovertemplate='<b>%{y}</b><br>Frekuensi: %{x:,}<extra></extra>')
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(16, 185, 129, 0.3);">
+                    <h4 style="color: #10b981; margin: 0; font-size: 0.9rem;">🔧 Top 10 Alat - Frekuensi</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                alat_data = df_filtered.groupby('Alat')['Durasi'].agg(['count', 'sum']).reset_index()
+                alat_data.columns = ['Alat', 'Frekuensi', 'Total_Durasi']
+                alat_data = alat_data.sort_values('Frekuensi', ascending=True).tail(10)
+                
+                fig = px.bar(
+                    alat_data,
+                    x='Frekuensi',
+                    y='Alat',
+                    orientation='h',
+                    color='Frekuensi',
+                    color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']]
+                )
+                fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+                fig.update_coloraxes(showscale=False)
+                fig.update_traces(hovertemplate='<b>%{y}</b><br>Frekuensi: %{x:,}<extra></extra>')
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
         with col2:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(245, 158, 11, 0.3);">
-                <h4 style="color: #f59e0b; margin: 0; font-size: 0.9rem;">⏱️ Top 10 Alat - Downtime</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            alat_downtime = df_filtered.groupby('Alat')['Durasi'].sum().reset_index()
-            alat_downtime.columns = ['Alat', 'Total_Durasi']
-            alat_downtime = alat_downtime.sort_values('Total_Durasi', ascending=True).tail(10)
-            
-            fig = px.bar(
-                alat_downtime,
-                x='Total_Durasi',
-                y='Alat',
-                orientation='h',
-                color='Total_Durasi',
-                color_continuous_scale=[[0, '#1e3a5f'], [1, '#f59e0b']]
-            )
-            fig.update_layout(**get_chart_layout(height=320, show_legend=False))
-            fig.update_coloraxes(showscale=False)
-            fig.update_traces(hovertemplate='<b>%{y}</b><br>Downtime: %{x:,.1f} jam<extra></extra>')
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(245, 158, 11, 0.3);">
+                    <h4 style="color: #f59e0b; margin: 0; font-size: 0.9rem;">⏱️ Top 10 Alat - Downtime</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                alat_downtime = df_filtered.groupby('Alat')['Durasi'].sum().reset_index()
+                alat_downtime.columns = ['Alat', 'Total_Durasi']
+                alat_downtime = alat_downtime.sort_values('Total_Durasi', ascending=True).tail(10)
+                
+                fig = px.bar(
+                    alat_downtime,
+                    x='Total_Durasi',
+                    y='Alat',
+                    orientation='h',
+                    color='Total_Durasi',
+                    color_continuous_scale=[[0, '#1e3a5f'], [1, '#f59e0b']]
+                )
+                fig.update_layout(**get_chart_layout(height=320, show_legend=False))
+                fig.update_coloraxes(showscale=False)
+                fig.update_traces(hovertemplate='<b>%{y}</b><br>Downtime: %{x:,.1f} jam<extra></extra>')
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     with tab3:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(59, 130, 246, 0.3);">
-                <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">🔄 Distribusi per Shift</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            shift_data = df_filtered.groupby('Shift')['Durasi'].agg(['count', 'sum']).reset_index()
-            shift_data.columns = ['Shift', 'Frekuensi', 'Total_Durasi']
-            shift_data['Shift'] = 'Shift ' + shift_data['Shift'].astype(int).astype(str)
-            
-            fig = px.bar(
-                shift_data,
-                x='Shift',
-                y='Frekuensi',
-                color='Shift',
-                text=shift_data['Frekuensi'].apply(lambda x: f'{x:,}'),
-                color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
-            )
-            fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-            fig.update_traces(textposition='outside')
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(59, 130, 246, 0.3);">
+                    <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">🔄 Distribusi per Shift</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                shift_data = df_filtered.groupby('Shift')['Durasi'].agg(['count', 'sum']).reset_index()
+                shift_data.columns = ['Shift', 'Frekuensi', 'Total_Durasi']
+                shift_data['Shift'] = 'Shift ' + shift_data['Shift'].astype(int).astype(str)
+                
+                fig = px.bar(
+                    shift_data,
+                    x='Shift',
+                    y='Frekuensi',
+                    color='Shift',
+                    text=shift_data['Frekuensi'].apply(lambda x: f'{x:,}'),
+                    color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
+                )
+                fig.update_layout(**get_chart_layout(height=300, show_legend=False))
+                fig.update_traces(textposition='outside')
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
         with col2:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(139, 92, 246, 0.3);">
-                <h4 style="color: #8b5cf6; margin: 0; font-size: 0.9rem;">⏱️ Downtime per Shift</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            fig = px.bar(
-                shift_data,
-                x='Shift',
-                y='Total_Durasi',
-                color='Shift',
-                text=shift_data['Total_Durasi'].apply(lambda x: f'{x:,.1f}'),
-                color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
-            )
-            fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-            fig.update_traces(textposition='outside')
-            fig.update_yaxes(title_text='Downtime (jam)')
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            with st.container(border=True):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                            border: 1px solid rgba(139, 92, 246, 0.3);">
+                    <h4 style="color: #8b5cf6; margin: 0; font-size: 0.9rem;">⏱️ Downtime per Shift</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                fig = px.bar(
+                    shift_data,
+                    x='Shift',
+                    y='Total_Durasi',
+                    color='Shift',
+                    text=shift_data['Total_Durasi'].apply(lambda x: f'{x:,.1f}'),
+                    color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b']
+                )
+                fig.update_layout(**get_chart_layout(height=300, show_legend=False))
+                fig.update_traces(textposition='outside')
+                fig.update_yaxes(title_text='Downtime (jam)')
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
         # Separator
         st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;'>", unsafe_allow_html=True)
         
         # Heatmap
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                    border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                    border: 1px solid rgba(239, 68, 68, 0.3);">
-            <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">🔥 Heatmap: Shift × Kelompok Masalah</h4>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        heatmap_data = df_filtered.copy()
-        heatmap_data['Shift'] = 'Shift ' + heatmap_data['Shift'].astype(int).astype(str)
-        
-        pivot = heatmap_data.pivot_table(
-            values='Durasi', 
-            index='Shift', 
-            columns='Kelompok Masalah', 
-            aggfunc='count', 
-            fill_value=0
-        )
-        
-        if not pivot.empty:
-            fig = px.imshow(
-                pivot,
-                color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#ef4444'], [1, '#fbbf24']],
-                aspect='auto',
-                text_auto=True
-            )
-            fig.update_layout(**get_chart_layout(height=250, show_legend=False))
-            fig.update_traces(textfont=dict(size=12, color='white'))
+        with st.container(border=True):
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
+                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
+                        border: 1px solid rgba(239, 68, 68, 0.3);">
+                <h4 style="color: #ef4444; margin: 0; font-size: 0.9rem;">🔥 Heatmap: Shift × Kelompok Masalah</h4>
+            </div>
+            """, unsafe_allow_html=True)
             
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            heatmap_data = df_filtered.copy()
+            heatmap_data['Shift'] = 'Shift ' + heatmap_data['Shift'].astype(int).astype(str)
+            
+            pivot = heatmap_data.pivot_table(
+                values='Durasi', 
+                index='Shift', 
+                columns='Kelompok Masalah', 
+                aggfunc='count', 
+                fill_value=0
+            )
+            
+            if not pivot.empty:
+                fig = px.imshow(
+                    pivot,
+                    color_continuous_scale=[[0, '#0f2744'], [0.3, '#1e3a5f'], [0.6, '#ef4444'], [1, '#fbbf24']],
+                    aspect='auto',
+                    text_auto=True
+                )
+                fig.update_layout(**get_chart_layout(height=250, show_legend=False))
+                fig.update_traces(textfont=dict(size=12, color='white'))
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     # ===== DATA TABLE =====
     st.markdown("""

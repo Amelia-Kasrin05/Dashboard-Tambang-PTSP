@@ -126,23 +126,24 @@ def show_dashboard():
     """, unsafe_allow_html=True)
     
     if not df_prod.empty:
-        daily = df_prod.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
-        
-        # Bar colors: red < 18k, orange 18k-25k, green >= 25k
-        colors = ['#10b981' if t >= DAILY_INTERNAL_TARGET else '#f59e0b' if t >= DAILY_PRODUCTION_TARGET else '#ef4444' 
-                  for t in daily['Tonnase']]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=daily['Date'], y=daily['Tonnase'], marker_color=colors,
-                            hovertemplate='<b>%{x|%d %b}</b><br>%{y:,.0f} ton<extra></extra>'))
-        fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_PRODUCTION_TARGET]*len(daily),
-                                line=dict(color='#ef4444', width=2, dash='dash'), name='Target'))
-        fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_INTERNAL_TARGET]*len(daily),
-                                line=dict(color='#f59e0b', width=2, dash='dot'), name='Internal'))
-        
-        fig.update_layout(**get_chart_layout(height=300))
-        fig.update_xaxes(tickformat='%d %b')
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        with st.container(border=True):
+            daily = df_prod.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
+            
+            # Bar colors: red < 18k, orange 18k-25k, green >= 25k
+            colors = ['#10b981' if t >= DAILY_INTERNAL_TARGET else '#f59e0b' if t >= DAILY_PRODUCTION_TARGET else '#ef4444' 
+                      for t in daily['Tonnase']]
+            
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=daily['Date'], y=daily['Tonnase'], marker_color=colors,
+                                hovertemplate='<b>%{x|%d %b}</b><br>%{y:,.0f} ton<extra></extra>'))
+            fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_PRODUCTION_TARGET]*len(daily),
+                                    line=dict(color='#ef4444', width=2, dash='dash'), name='Target'))
+            fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_INTERNAL_TARGET]*len(daily),
+                                    line=dict(color='#f59e0b', width=2, dash='dot'), name='Internal'))
+            
+            fig.update_layout(**get_chart_layout(height=300))
+            fig.update_xaxes(tickformat='%d %b')
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     # ===== DISTRIBUTION ANALYSIS =====
     st.markdown("""
@@ -156,34 +157,37 @@ def show_dashboard():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("**Per Excavator**")
-        if not df_prod.empty:
-            exc = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index()
-            exc = exc.sort_values('Tonnase', ascending=True).tail(6)
-            fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h',
-                        color='Tonnase', color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']])
-            fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-            fig.update_coloraxes(showscale=False)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        with st.container(border=True):
+            st.markdown("**Per Excavator**")
+            if not df_prod.empty:
+                exc = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index()
+                exc = exc.sort_values('Tonnase', ascending=True).tail(6)
+                fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h',
+                            color='Tonnase', color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']])
+                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
+                fig.update_coloraxes(showscale=False)
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     with col2:
-        st.markdown("**Per Material**")
-        if not df_prod.empty:
-            mat = df_prod.groupby('Commudity')['Tonnase'].sum().reset_index()
-            fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5,
-                        color_discrete_sequence=CHART_SEQUENCE)
-            fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-            fig.update_traces(textposition='inside', textinfo='percent')
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        with st.container(border=True):
+            st.markdown("**Per Material**")
+            if not df_prod.empty:
+                mat = df_prod.groupby('Commudity')['Tonnase'].sum().reset_index()
+                fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5,
+                            color_discrete_sequence=CHART_SEQUENCE)
+                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
+                fig.update_traces(textposition='inside', textinfo='percent')
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     with col3:
-        st.markdown("**Per Shift**")
-        if not df_prod.empty:
-            shift = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
-            fig = px.bar(shift, x='Shift', y='Tonnase', color='Shift',
-                        color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b'])
-            fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        with st.container(border=True):
+            st.markdown("**Per Shift**")
+            if not df_prod.empty:
+                shift = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
+                fig = px.bar(shift, x='Shift', y='Tonnase', color='Shift',
+                            color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b'])
+                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     # ===== BOTTOM SECTION =====
     st.markdown("""
@@ -197,24 +201,26 @@ def show_dashboard():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**Top 10 BLOK**")
-        if not df_prod.empty:
-            blok = df_prod.groupby('BLOK')['Tonnase'].sum().reset_index()
-            blok = blok.sort_values('Tonnase', ascending=False).head(10)
-            fig = px.bar(blok, x='BLOK', y='Tonnase', color='Tonnase',
-                        color_continuous_scale=[[0, '#1e3a5f'], [1, '#3b82f6']])
-            fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-            fig.update_coloraxes(showscale=False)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        with st.container(border=True):
+            st.markdown("**Top 10 BLOK**")
+            if not df_prod.empty:
+                blok = df_prod.groupby('BLOK')['Tonnase'].sum().reset_index()
+                blok = blok.sort_values('Tonnase', ascending=False).head(10)
+                fig = px.bar(blok, x='BLOK', y='Tonnase', color='Tonnase',
+                            color_continuous_scale=[[0, '#1e3a5f'], [1, '#3b82f6']])
+                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
+                fig.update_coloraxes(showscale=False)
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     with col2:
-        st.markdown("**Top Gangguan**")
-        if not df_gangguan.empty:
-            dg = df_gangguan.groupby('Gangguan').size().reset_index(name='Frekuensi')
-            dg = dg.sort_values('Frekuensi', ascending=True).tail(5)
-            fig = px.bar(dg, x='Frekuensi', y='Gangguan', orientation='h',
-                        color_discrete_sequence=[MINING_COLORS['red']])
-            fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info("📊 No gangguan data available")
+        with st.container(border=True):
+            st.markdown("**Top Gangguan**")
+            if not df_gangguan.empty:
+                dg = df_gangguan.groupby('Gangguan').size().reset_index(name='Frekuensi')
+                dg = dg.sort_values('Frekuensi', ascending=True).tail(5)
+                fig = px.bar(dg, x='Frekuensi', y='Gangguan', orientation='h',
+                            color_discrete_sequence=[MINING_COLORS['red']])
+                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.info("📊 No gangguan data available")

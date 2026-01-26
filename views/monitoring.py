@@ -266,46 +266,47 @@ def show_monitoring():
     
     # Try to build S-Curve from Analisa Produksi
     if not df_prod.empty:
-        try:
-            # Find Tanggal, Plan, Aktual in header row
-            header_row = df_prod.iloc[0].tolist()
-            tanggal_idx = next((i for i, v in enumerate(header_row) if 'tanggal' in str(v).lower()), 0)
-            plan_idx = next((i for i, v in enumerate(header_row) if 'plan' in str(v).lower()), 1)
-            aktual_idx = next((i for i, v in enumerate(header_row) if 'aktual' in str(v).lower()), 2)
-            
-            # Extract data
-            df_chart = df_prod.iloc[1:, [tanggal_idx, plan_idx, aktual_idx]].copy()
-            df_chart.columns = ['Tanggal', 'Plan', 'Aktual']
-            df_chart['Plan'] = pd.to_numeric(df_chart['Plan'], errors='coerce').fillna(0)
-            df_chart['Aktual'] = pd.to_numeric(df_chart['Aktual'], errors='coerce').fillna(0)
-            df_chart = df_chart[df_chart['Plan'] > 0]  # Filter valid rows
-            
-            # Cumulative
-            df_chart['Cum_Plan'] = df_chart['Plan'].cumsum()
-            df_chart['Cum_Aktual'] = df_chart['Aktual'].cumsum()
-            
-            fig_s = go.Figure()
-            fig_s.add_trace(go.Scatter(
-                x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Plan'],
-                mode='lines', name='Cumulative Plan',
-                line=dict(color='#d4a84b', width=3, dash='dash')
-            ))
-            fig_s.add_trace(go.Scatter(
-                x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Aktual'],
-                mode='lines+markers', name='Cumulative Aktual',
-                line=dict(color='#10b981', width=4),
-                fill='tonexty', fillcolor='rgba(16, 185, 129, 0.1)'
-            ))
-            fig_s.update_layout(
-                **get_chart_layout(height=400),
-                xaxis_title="Hari",
-                yaxis_title="Tonase (Kumulatif)",
-                legend=dict(orientation="h", y=1.1),
-                hovermode="x unified"
-            )
-            st.plotly_chart(fig_s, use_container_width=True)
-        except Exception as e:
-            st.info(f"ℹ️ Data S-Curve tidak tersedia: {e}")
+        with st.container(border=True):
+            try:
+                # Find Tanggal, Plan, Aktual in header row
+                header_row = df_prod.iloc[0].tolist()
+                tanggal_idx = next((i for i, v in enumerate(header_row) if 'tanggal' in str(v).lower()), 0)
+                plan_idx = next((i for i, v in enumerate(header_row) if 'plan' in str(v).lower()), 1)
+                aktual_idx = next((i for i, v in enumerate(header_row) if 'aktual' in str(v).lower()), 2)
+                
+                # Extract data
+                df_chart = df_prod.iloc[1:, [tanggal_idx, plan_idx, aktual_idx]].copy()
+                df_chart.columns = ['Tanggal', 'Plan', 'Aktual']
+                df_chart['Plan'] = pd.to_numeric(df_chart['Plan'], errors='coerce').fillna(0)
+                df_chart['Aktual'] = pd.to_numeric(df_chart['Aktual'], errors='coerce').fillna(0)
+                df_chart = df_chart[df_chart['Plan'] > 0]  # Filter valid rows
+                
+                # Cumulative
+                df_chart['Cum_Plan'] = df_chart['Plan'].cumsum()
+                df_chart['Cum_Aktual'] = df_chart['Aktual'].cumsum()
+                
+                fig_s = go.Figure()
+                fig_s.add_trace(go.Scatter(
+                    x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Plan'],
+                    mode='lines', name='Cumulative Plan',
+                    line=dict(color='#d4a84b', width=3, dash='dash')
+                ))
+                fig_s.add_trace(go.Scatter(
+                    x=list(range(1, len(df_chart)+1)), y=df_chart['Cum_Aktual'],
+                    mode='lines+markers', name='Cumulative Aktual',
+                    line=dict(color='#10b981', width=4),
+                    fill='tonexty', fillcolor='rgba(16, 185, 129, 0.1)'
+                ))
+                fig_s.update_layout(
+                    **get_chart_layout(height=400),
+                    xaxis_title="Hari",
+                    yaxis_title="Tonase (Kumulatif)",
+                    legend=dict(orientation="h", y=1.1),
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_s, use_container_width=True)
+            except Exception as e:
+                st.info(f"ℹ️ Data S-Curve tidak tersedia: {e}")
     else:
         st.info("ℹ️ Data Analisa Produksi tidak tersedia.")
     
@@ -342,27 +343,29 @@ def show_monitoring():
                 df_loc = pd.DataFrame(loc_data).sort_values('Ritase', ascending=True)
                 
                 with col_r1:
-                    fig_loc = px.bar(
-                        df_loc.tail(10), y='Location', x='Ritase',
-                        orientation='h',
-                        title='🏆 Top 10 Loading Points',
-                        color='Ritase', color_continuous_scale='Viridis',
-                        text_auto='.0f'
-                    )
-                    fig_loc.update_layout(**get_chart_layout(height=400))
-                    st.plotly_chart(fig_loc, use_container_width=True)
+                    with st.container(border=True):
+                        fig_loc = px.bar(
+                            df_loc.tail(10), y='Location', x='Ritase',
+                            orientation='h',
+                            title='🏆 Top 10 Loading Points',
+                            color='Ritase', color_continuous_scale='Viridis',
+                            text_auto='.0f'
+                        )
+                        fig_loc.update_layout(**get_chart_layout(height=400))
+                        st.plotly_chart(fig_loc, use_container_width=True)
                     
                 with col_r2:
-                    # Pie chart
-                    fig_pie = px.pie(
-                        df_loc, values='Ritase', names='Location',
-                        title='📊 Ritase Proportion',
-                        hole=0.4,
-                        color_discrete_sequence=px.colors.qualitative.Bold
-                    )
-                    fig_pie.update_layout(**get_chart_layout(height=400))
-                    fig_pie.update_traces(textposition='inside', textinfo='percent')
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                    with st.container(border=True):
+                        # Pie chart
+                        fig_pie = px.pie(
+                            df_loc, values='Ritase', names='Location',
+                            title='📊 Ritase Proportion',
+                            hole=0.4,
+                            color_discrete_sequence=px.colors.qualitative.Bold
+                        )
+                        fig_pie.update_layout(**get_chart_layout(height=400))
+                        fig_pie.update_traces(textposition='inside', textinfo='percent')
+                        st.plotly_chart(fig_pie, use_container_width=True)
         except Exception as e:
             st.info(f"ℹ️ Error processing Ritase: {e}")
     else:
@@ -384,37 +387,39 @@ def show_monitoring():
     if not df_bbm.empty:
         try:
             with col_b1:
-                # BBM by Unit Type
-                if 'Tipe Alat' in df_bbm.columns and 'Total' in df_bbm.columns:
-                    df_type = df_bbm.groupby('Tipe Alat')['Total'].sum().reset_index()
-                    df_type['Total'] = pd.to_numeric(df_type['Total'], errors='coerce')
-                    df_type = df_type[df_type['Total'] > 0]
-                    
-                    fig_type = px.pie(
-                        df_type, values='Total', names='Tipe Alat',
-                        title='⛽ BBM by Unit Type',
-                        hole=0.4,
-                        color_discrete_sequence=px.colors.qualitative.Bold
-                    )
-                    fig_type.update_layout(**get_chart_layout(height=350))
-                    fig_type.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_type, use_container_width=True)
+                with st.container(border=True):
+                    # BBM by Unit Type
+                    if 'Tipe Alat' in df_bbm.columns and 'Total' in df_bbm.columns:
+                        df_type = df_bbm.groupby('Tipe Alat')['Total'].sum().reset_index()
+                        df_type['Total'] = pd.to_numeric(df_type['Total'], errors='coerce')
+                        df_type = df_type[df_type['Total'] > 0]
+                        
+                        fig_type = px.pie(
+                            df_type, values='Total', names='Tipe Alat',
+                            title='⛽ BBM by Unit Type',
+                            hole=0.4,
+                            color_discrete_sequence=px.colors.qualitative.Bold
+                        )
+                        fig_type.update_layout(**get_chart_layout(height=350))
+                        fig_type.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig_type, use_container_width=True)
                     
             with col_b2:
-                # Top 10 BBM Consumers
-                if 'Alat Berat' in df_bbm.columns and 'Total' in df_bbm.columns:
-                    df_top = df_bbm[['Alat Berat', 'Tipe Alat', 'Total']].copy()
-                    df_top['Total'] = pd.to_numeric(df_top['Total'], errors='coerce')
-                    df_top = df_top.nlargest(10, 'Total')
-                    
-                    fig_top = px.bar(
-                        df_top, x='Total', y='Alat Berat',
-                        orientation='h', color='Tipe Alat',
-                        title='🚨 Top 10 Fuel Consumers',
-                        text_auto='.0f'
-                    )
-                    fig_top.update_layout(**get_chart_layout(height=350), yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_top, use_container_width=True)
+                with st.container(border=True):
+                    # Top 10 BBM Consumers
+                    if 'Alat Berat' in df_bbm.columns and 'Total' in df_bbm.columns:
+                        df_top = df_bbm[['Alat Berat', 'Tipe Alat', 'Total']].copy()
+                        df_top['Total'] = pd.to_numeric(df_top['Total'], errors='coerce')
+                        df_top = df_top.nlargest(10, 'Total')
+                        
+                        fig_top = px.bar(
+                            df_top, x='Total', y='Alat Berat',
+                            orientation='h', color='Tipe Alat',
+                            title='🚨 Top 10 Fuel Consumers',
+                            text_auto='.0f'
+                        )
+                        fig_top.update_layout(**get_chart_layout(height=350), yaxis={'categoryorder':'total ascending'})
+                        st.plotly_chart(fig_top, use_container_width=True)
         except Exception as e:
             st.info(f"ℹ️ Error processing BBM: {e}")
     else:
@@ -436,36 +441,38 @@ def show_monitoring():
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
-                # Gangguan by Kendala
-                if 'Kendala' in df_gang.columns:
-                    df_kendala = df_gang.groupby('Kendala').size().reset_index(name='Frekuensi')
-                    df_kendala = df_kendala[df_kendala['Kendala'].notna()]
-                    
-                    fig_kendala = px.bar(
-                        df_kendala.nlargest(10, 'Frekuensi'), 
-                        x='Frekuensi', y='Kendala',
-                        orientation='h',
-                        title='📊 Gangguan by Kendala',
-                        color='Frekuensi',
-                        color_continuous_scale='Reds'
-                    )
-                    fig_kendala.update_layout(**get_chart_layout(height=350))
-                    st.plotly_chart(fig_kendala, use_container_width=True)
+                with st.container(border=True):
+                    # Gangguan by Kendala
+                    if 'Kendala' in df_gang.columns:
+                        df_kendala = df_gang.groupby('Kendala').size().reset_index(name='Frekuensi')
+                        df_kendala = df_kendala[df_kendala['Kendala'].notna()]
+                        
+                        fig_kendala = px.bar(
+                            df_kendala.nlargest(10, 'Frekuensi'), 
+                            x='Frekuensi', y='Kendala',
+                            orientation='h',
+                            title='📊 Gangguan by Kendala',
+                            color='Frekuensi',
+                            color_continuous_scale='Reds'
+                        )
+                        fig_kendala.update_layout(**get_chart_layout(height=350))
+                        st.plotly_chart(fig_kendala, use_container_width=True)
                     
             with col_g2:
-                # Gangguan by Masalah
-                if 'Masalah' in df_gang.columns:
-                    df_masalah = df_gang.groupby('Masalah').size().reset_index(name='Frekuensi')
-                    df_masalah = df_masalah[df_masalah['Masalah'].notna()]
-                    
-                    fig_masalah = px.pie(
-                        df_masalah.nlargest(8, 'Frekuensi'),
-                        values='Frekuensi', names='Masalah',
-                        title='📊 Top Masalah',
-                        hole=0.4
-                    )
-                    fig_masalah.update_layout(**get_chart_layout(height=350))
-                    st.plotly_chart(fig_masalah, use_container_width=True)
+                with st.container(border=True):
+                    # Gangguan by Masalah
+                    if 'Masalah' in df_gang.columns:
+                        df_masalah = df_gang.groupby('Masalah').size().reset_index(name='Frekuensi')
+                        df_masalah = df_masalah[df_masalah['Masalah'].notna()]
+                        
+                        fig_masalah = px.pie(
+                            df_masalah.nlargest(8, 'Frekuensi'),
+                            values='Frekuensi', names='Masalah',
+                            title='📊 Top Masalah',
+                            hole=0.4
+                        )
+                        fig_masalah.update_layout(**get_chart_layout(height=350))
+                        st.plotly_chart(fig_masalah, use_container_width=True)
         except Exception as e:
             st.info(f"ℹ️ Error processing Gangguan: {e}")
     else:

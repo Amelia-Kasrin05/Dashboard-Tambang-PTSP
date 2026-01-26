@@ -864,37 +864,38 @@ def show_daily_plan():
     fig = create_mining_map(df_filtered, pd.Timestamp(selected_date), shift_label)
     
     # 2-Column Layout
-    # DATE HEADER (Full Width Top)
-    st.markdown(f"""
-    <div style="background: white; border-radius: 8px; padding: 15px; text-align: center; margin-bottom: 10px; border: 1px solid #ccc;">
-         <span style="font-size: 24px; font-weight: bold; color: black; margin-right: 15px;">{day_id},</span>
-         <span style="font-size: 24px; color: black;">{date_str}</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # MAP (Full Width)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True, config={
-            'displayModeBar': True,
-            'modeBarButtonsToRemove': ['lasso2d'], 
-            'scrollZoom': False, 
-            'displaylogo': False,
-            'toImageButtonOptions': {
-                'format': 'jpeg',
-                'filename': f'Daily Scheduling {date_str}',
-                'height': MAP_HEIGHT,
-                'width': MAP_WIDTH,
-                'scale': 3 
-            }
-        })
-        
-        st.markdown("""
-        <div style="text-align: right; color: #666; font-size: 11px; margin-top: -5px;">
-            🔍 Gunakan tombol di atas kanan peta untuk Zoom/Pan | 📷 Ikon Kamera: Download PNG
+    with st.container(border=True):
+        # DATE HEADER (Full Width Top)
+        st.markdown(f"""
+        <div style="background: white; border-radius: 8px; padding: 15px; text-align: center; margin-bottom: 10px; border: 1px solid #ccc;">
+            <span style="font-size: 24px; font-weight: bold; color: black; margin-right: 15px;">{day_id},</span>
+            <span style="font-size: 24px; color: black;">{date_str}</span>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        st.info("ℹ️ Tidak ada data untuk ditampilkan pada filter yang dipilih.")
+        
+        # MAP (Full Width)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True, config={
+                'displayModeBar': True,
+                'modeBarButtonsToRemove': ['lasso2d'], 
+                'scrollZoom': False, 
+                'displaylogo': False,
+                'toImageButtonOptions': {
+                    'format': 'jpeg',
+                    'filename': f'Daily Scheduling {date_str}',
+                    'height': MAP_HEIGHT,
+                    'width': MAP_WIDTH,
+                    'scale': 3 
+                }
+            })
+            
+            st.markdown("""
+            <div style="text-align: right; color: #666; font-size: 11px; margin-top: -5px;">
+                🔍 Gunakan tombol di atas kanan peta untuk Zoom/Pan | 📷 Ikon Kamera: Download PNG
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("ℹ️ Tidak ada data untuk ditampilkan pada filter yang dipilih.")
     
     # ============================================================
     # TABLE SECTION (FULL WIDTH BELOW MAP)
