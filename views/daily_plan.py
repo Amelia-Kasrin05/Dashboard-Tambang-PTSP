@@ -255,12 +255,16 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     # (Note: Filter Tanggal already applied upstream or in mask, assuming df_filtered is usually single day or we group by date too)
     
     # Group fields
-    group_cols = ['lokasi_id', 'Alat Muat', 'Alat Angkut', 'ROM']
+    # USER REQUEST: Merge same equipment labels. Removed 'ROM' from grouping keys.
+    group_cols = ['lokasi_id', 'Alat Muat', 'Alat Angkut']
     if 'Tanggal' in df_map.columns:
          group_cols.insert(0, 'Tanggal')
 
-    # Aggregation: Shift -> Combine unique sorted
-    grouped = df_map.groupby(group_cols)['Shift'].unique().reset_index()
+    # Aggregation: Shift AND ROM -> Combine unique sorted
+    grouped = df_map.groupby(group_cols).agg({
+        'Shift': 'unique',
+        'ROM': 'unique'
+    }).reset_index()
 
     # ------------------------------------------------------------
     # 4. PLOTTING & FORMATTING
@@ -274,7 +278,7 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         loc_id = row['lokasi_id']
         alat_muat = row['Alat Muat']
         alat_angkut = row['Alat Angkut']
-        rom = row['ROM']
+        rom_list = row['ROM'] # Now an array/list
         shifts = row['Shift']
         
         # Get Coordinates
@@ -282,8 +286,6 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         
         if loc_id == 'SP3':
             # SP3 in Top Left Corner - FORCE POSITION overrides
-            # Although get_grid_position returns it, we can force it here if needed
-            # But get_grid_position should return (30, 30)
             pos = get_grid_position(loc_id, loc_id)
             if pos:
                 x, y = pos
@@ -312,8 +314,14 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         shift_str = " & ".join([str(s) for s in sorted_shifts])
         line2 = f"Shift {shift_str}"
         
-        # Line 3: LS> <ROM>
-        line3 = f"LS> {rom}"
+        # Line 3: LS> <ROM> (Combined)
+        # Filter empty ROMs just in case
+        valid_roms = [str(r) for r in rom_list if pd.notna(r) and str(r).strip() not in ['', 'nan', 'None']]
+        # Unique ROMs only (set) then sort
+        unique_roms = sorted(list(set(valid_roms)))
+        
+        rom_str = " & ".join(unique_roms)
+        line3 = f"LS> {rom_str}"
         
         # Combined Box Text
         box_text = f"{line1}<br>{line2}<br>{line3}"
