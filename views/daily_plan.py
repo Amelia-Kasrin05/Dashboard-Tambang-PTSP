@@ -878,7 +878,14 @@ def show_daily_plan():
             'displayModeBar': True,
             'modeBarButtonsToRemove': ['lasso2d'], 
             'scrollZoom': False, 
-            'displaylogo': False
+            'displaylogo': False,
+            'toImageButtonOptions': {
+                'format': 'jpeg',
+                'filename': f'Daily Scheduling {date_str}',
+                'height': MAP_HEIGHT,
+                'width': MAP_WIDTH,
+                'scale': 3 
+            }
         })
         
         st.markdown("""
