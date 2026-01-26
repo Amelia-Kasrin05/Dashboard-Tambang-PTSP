@@ -476,16 +476,21 @@ def show_produksi():
         cols_export = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         cols_export = [c for c in cols_export if c in df_filtered.columns]
         
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_filtered[cols_export].sort_index(ascending=False).to_excel(writer, index=False, sheet_name='Produksi')
+        try:
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_filtered[cols_export].sort_index(ascending=False).to_excel(writer, index=False, sheet_name='Produksi')
             
-        st.download_button(
-            label="📥 Export Excel",
-            data=buffer.getvalue(),
-            file_name=f"produksi_export_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            st.download_button(
+                label="📥 Export Excel",
+                data=buffer.getvalue(),
+                file_name=f"produksi_export_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.warning(f"⚠️ Export tidak tersedia saat ini (Disk Full/Error).")
+            # Log error nicely without breaking app
+            print(f"Export Error: {e}")
     
     # Table
     cols_show = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']

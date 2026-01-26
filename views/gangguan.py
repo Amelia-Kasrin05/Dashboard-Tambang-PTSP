@@ -528,16 +528,20 @@ def show_gangguan():
             if col in df_export.columns:
                 df_export[col] = df_export[col].astype(str)
 
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_export.to_excel(writer, index=False, sheet_name='Gangguan')
+        try:
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='Gangguan')
             
-        st.download_button(
-            label="📥 Export Excel",
-            data=buffer.getvalue(),
-            file_name=f"gangguan_filtered_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            st.download_button(
+                label="📥 Export Excel",
+                data=buffer.getvalue(),
+                file_name=f"gangguan_filtered_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.warning("⚠️ Export tidak tersedia saat ini (Disk Full/Error).")
+            print(f"Export Error Gangguan: {e}")
     
     # Show dataframe - ALL columns from Excel with exact headers (including Crusher from Nov 2025)
     cols_show = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 

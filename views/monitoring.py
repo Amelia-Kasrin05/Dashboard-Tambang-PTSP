@@ -487,18 +487,27 @@ def show_monitoring():
     
     with col_exp1:
         if not df_bbm.empty:
-            buf = io.BytesIO()
-            df_bbm.to_excel(buf, index=False, sheet_name='BBM')
-            st.download_button("📥 Export BBM", buf.getvalue(), "BBM_Export.xlsx", use_container_width=True)
+            try:
+                buf = io.BytesIO()
+                df_bbm.to_excel(buf, index=False, sheet_name='BBM')
+                st.download_button("📥 Export BBM", buf.getvalue(), "BBM_Export.xlsx", use_container_width=True)
+            except Exception as e:
+                st.warning("⚠️ Export Failed (Disk Full)")
             
     with col_exp2:
         if not df_rit.empty:
-            buf = io.BytesIO()
-            df_rit.to_excel(buf, index=False, sheet_name='Ritase')
-            st.download_button("📥 Export Ritase", buf.getvalue(), "Ritase_Export.xlsx", use_container_width=True)
+            try:
+                buf = io.BytesIO()
+                df_rit.to_excel(buf, index=False, sheet_name='Ritase')
+                st.download_button("📥 Export Ritase", buf.getvalue(), "Ritase_Export.xlsx", use_container_width=True)
+            except Exception as e:
+                st.warning("⚠️ Export Failed")
             
     with col_exp3:
         if not df_gang.empty:
-            buf = io.BytesIO()
-            df_gang.to_excel(buf, index=False, sheet_name='Gangguan')
-            st.download_button("📥 Export Gangguan", buf.getvalue(), "Gangguan_Export.xlsx", use_container_width=True)
+            try:
+                buf = io.BytesIO()
+                df_gang.to_excel(buf, index=False, sheet_name='Gangguan')
+                st.download_button("📥 Export Gangguan", buf.getvalue(), "Gangguan_Export.xlsx", use_container_width=True)
+            except Exception as e:
+                st.warning("⚠️ Export Failed")
