@@ -236,9 +236,10 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         
         # Rule: Jika Grid kosong dan Blok terisi -> lokasi_id = Blok
         if blok and blok.lower() != 'nan':
-            # Mapping Khusus: Blok SP3 -> Grid K3
-            if blok == 'SP3':
+            # Mapping Khusus: Blok SP6 -> Grid K3
+            if blok == 'SP6':
                 return 'K3'
+            # SP3 tetap SP3 (nanti dihandle get_grid_position)
             return blok
         
         return None
@@ -279,9 +280,13 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         # Get Coordinates
         x, y = None, None
         
-        if loc_id == 'SP6':
-            # Move SP6 slightly inward so label doesn't get cut off
-            x, y = 140, 100 
+        if loc_id == 'SP3':
+            # SP3 in Top Left Corner - FORCE POSITION overrides
+            # Although get_grid_position returns it, we can force it here if needed
+            # But get_grid_position should return (30, 30)
+            pos = get_grid_position(loc_id, loc_id)
+            if pos:
+                x, y = pos
         else:
             # Use standard mapping
             pos = get_grid_position(loc_id)
@@ -320,19 +325,34 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         target_x, target_y = x, y_plot
         
         # Determine Direction preference
-        # If very close to left edge (x < 150), force RIGHT
-        # If very close to right edge (x > width-150), force LEFT
-        if x < 150: direction = 1
-        elif x > MAP_WIDTH - 150: direction = -1
-        else: direction = -1 if x < 700 else 1
+        
+        # SPECIAL OVERRIDES
+        if loc_id == 'N8':
+            direction = -1 # Force LEFT for N8 as requested
+            
+        # GENERAL LOGIC
+        elif x < 100: direction = 1
+        elif x > MAP_WIDTH - 100: direction = -1
+        else: 
+            # User requested Grid 7+ (A7..P7, x approx 437) to face RIGHT.
+            # Grid 6 is x approx 390.
+            # So split at 410 ensures Col 1-6 (Space for SP6/K3) are LEFT, and Col 7+ are RIGHT.
+            direction = -1 if x < 410 else 1
         
         # Calculate Label Position
-        offset_dist = 160
+        # Reduced offset to keep labels tieter and fit better
+        offset_dist = 120 
         label_x = x + (direction * offset_dist)
         
-        # CLAMP X to be inside map (Buffer 80px form edge)
-        if label_x < 80: label_x = 80
-        if label_x > MAP_WIDTH - 80: label_x = MAP_WIDTH - 80
+        # CLAMP X to be inside map
+        # Reduced box width to 100px (half 50) + Margin 10 = 60
+        BOX_HALF_WIDTH = 50 
+        X_MARGIN = 10
+        MIN_X = BOX_HALF_WIDTH + X_MARGIN     # 60
+        MAX_X = MAP_WIDTH - BOX_HALF_WIDTH - X_MARGIN # 1340
+        
+        if label_x < MIN_X: label_x = MIN_X
+        if label_x > MAX_X: label_x = MAX_X
         
         # Vertical Stacking Logic
         y_bucket = round(y_plot / 50) * 50
@@ -344,22 +364,24 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         # Default Y behavior
         label_y = y_plot - (stack_idx * 55)
         
-        # SPECIAL HANDLING FOR CORNERS (e.g. SP6 Top Left)
-        # If point is high up (y_plot near 0 or MAP_HEIGHT), force label inward
-        # In Plotly, Y=0 is bottom, Y=MAP_HEIGHT is top.
-        # But we flipped y_plot = MAP_HEIGHT - y. 
-        # So Top Left point (x=50, y=50) -> y_plot = ~1400.
-        
+        # SPECIAL HANDLING FOR CORNERS (e.g. SP3 Top Left)
         if y_plot > MAP_HEIGHT - 100: # Very close to TOP
              # Force label DOWN
              label_y = y_plot - 80 - (stack_idx * 55)
              
         # Clamp Y
-        if label_y < 50: label_y = 50
-        if label_y > MAP_HEIGHT - 50: label_y = MAP_HEIGHT - 50
+        # Box height approx 50-60px -> Half height 30px -> Buffer 10px
+        Y_MARGIN = 10
+        BOX_HALF_HEIGHT = 30 
+        
+        MIN_Y = BOX_HALF_HEIGHT + Y_MARGIN
+        MAX_Y = MAP_HEIGHT - BOX_HALF_HEIGHT - Y_MARGIN
+        
+        if label_y < MIN_Y: label_y = MIN_Y
+        if label_y > MAX_Y: label_y = MAX_Y
         
         # Elbow Path construction
-        elbow_x = x + (direction * 40) # Short stub
+        elbow_x = x + (direction * 30) # Short stub reduced
         
         # Path: Dot -> Stub -> Vertical -> Label
         path_svg = f"M {target_x},{target_y} L {elbow_x},{target_y} L {elbow_x},{label_y} L {label_x},{label_y}"
@@ -382,11 +404,12 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
             bordercolor='white',
             borderwidth=1,
             borderpad=4,
-            font=dict(size=9, color='black', family='Arial, sans-serif'),
+            # Reduced font size to 8 as requested
+            font=dict(size=8, color='black', family='Arial, sans-serif'),
             opacity=1.0, 
             align='center',
             captureevents=True,
-            width=110
+            width=100
         )
         
         # Add Marker Dot

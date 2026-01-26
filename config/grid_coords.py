@@ -56,8 +56,8 @@ GRID_COORDS = load_grid_coords_from_file()
 # ============================================================
 
 SPECIAL_LOCATIONS = {
-    'SP6': (50, 50),      # Top-left corner (Stockpile 6)
-    'SP3': None,          # Will use K3 grid position
+    'SP3': (60, 60),      # Top-left corner (Stockpile 3) - shifted inward to stay on map
+    'SP6': None,          # Will use K3 grid position
 }
 
 # ============================================================
@@ -90,14 +90,22 @@ def get_grid_position(grid_id, blok=None):
     if not grid_id or str(grid_id).lower() in ['nan', 'none', '']:
         if blok:
             blok_upper = str(blok).upper().strip()
-            if blok_upper == 'SP6':
-                return SPECIAL_LOCATIONS['SP6']
-            elif blok_upper == 'SP3':
-                # SP3 uses K3 position
+            if blok_upper == 'SP3':
+                return SPECIAL_LOCATIONS['SP3']
+            elif blok_upper == 'SP6':
+                # SP6 uses K3 position
                 return GRID_COORDS.get('K3', (251, 660))
         return None
     
     grid_id = str(grid_id).strip().upper()
+    
+    # Check if grid_id itself is a special location (e.g. SP3 passed as grid)
+    if grid_id in SPECIAL_LOCATIONS and SPECIAL_LOCATIONS[grid_id] is not None:
+        return SPECIAL_LOCATIONS[grid_id]
+        
+    # Check if this "grid" is actually SP6 which maps to K3
+    if grid_id == 'SP6':
+        return GRID_COORDS.get('K3', (251, 660))
     
     # Handle compound grids like 'F5/C5' - use first one
     if '/' in grid_id:
