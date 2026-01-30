@@ -14,14 +14,26 @@ st.set_page_config(
 )
 
 # Import components
+# Import components
 from components import inject_css, show_login, render_sidebar
 from views import (
     show_dashboard, 
-    show_produksi, 
-    show_gangguan, 
-    show_monitoring, 
+    show_produksi,
+    show_ritase,
+    show_gangguan,
+    # show_monitoring, # Deprecated/Refactored
     show_daily_plan
 )
+# Placeholder imports for new modules (create files next)
+try:
+    from views.process import show_process
+except ImportError:
+    def show_process(): st.title("⚙️ Stockpile & Process (Under Construction)")
+
+try:
+    from views.shipping import show_shipping
+except ImportError:
+    def show_shipping(): st.title("🚢 Sales & Shipping (Under Construction)")
 
 # ============================================================
 # SESSION STATE INITIALIZATION
@@ -33,7 +45,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.name = None
 
 if 'current_menu' not in st.session_state:
-    st.session_state.current_menu = "Dashboard"
+    st.session_state.current_menu = "Ringkasan Eksekutif"
 
 
 # ============================================================
@@ -49,16 +61,24 @@ def main():
         render_sidebar()
         
         # Route to pages
-        if st.session_state.current_menu == "Dashboard":
+        menu = st.session_state.current_menu
+        
+        if menu == "Ringkasan Eksekutif" or menu == "Executive Summary": # Keep compat or just switch
             show_dashboard()
-        elif st.session_state.current_menu == "Produksi":
+        elif menu == "Produksi":
             show_produksi()
-        elif st.session_state.current_menu == "Gangguan":
+        elif menu == "Ritase":
+            show_ritase()
+        elif menu == "Stockpile & Proses":
+            show_process()
+        elif menu == "Gangguan Unit" or menu == "Gangguan":
             show_gangguan()
-        elif st.session_state.current_menu == "Monitoring":
-            show_monitoring()
-        elif st.session_state.current_menu == "Daily Plan":
+        elif menu == "Pengiriman & Logistik":
+            show_shipping()
+        elif menu == "Daily Plan":
             show_daily_plan()
+        else:
+            show_dashboard()
 
 
 if __name__ == "__main__":

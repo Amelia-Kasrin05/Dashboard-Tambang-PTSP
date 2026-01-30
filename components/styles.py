@@ -383,13 +383,31 @@ input {color: var(--text-primary) !important;}
     border-radius: 8px !important;
 }
 
-/* ===== NATIVE BORDER CONTAINER ===== */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    background: var(--bg-card) !important;
-    border: 1px solid var(--border-color) !important;
+/* ===== NATIVE BORDER CONTAINER REPLACEMENT ===== */
+div[data-testid="stVerticalBlockBorderWrapper"],
+div[data-testid="stVerticalBlock"][style*="border"], 
+div.element-container:has(> iframe[title="stream"]) {   
+    /* VISIBLE CONTRAST CARD STYLE */
+    background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important; /* Lighter than main BG */
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
     border-radius: 16px !important;
     padding: 1.25rem !important;
-    box-shadow: var(--shadow) !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    margin-bottom: 1rem !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:hover,
+div[data-testid="stVerticalBlock"][style*="border"]:hover {
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important; /* Even lighter on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+    transition: all 0.3s ease !important;
+}
+
+/* Ensure Charts are visible on top of this background */
+div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"] {
+    background: transparent !important;
 }
 </style>
 """, unsafe_allow_html=True)

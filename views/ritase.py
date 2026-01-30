@@ -1,0 +1,337 @@
+# ============================================================
+# RITASE - Hauling & Logistics Dashboard
+# ============================================================
+# Industry-grade mining operations monitoring
+# Version 1.0 - Ritase Analysis
+
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+import pandas as pd
+from datetime import datetime
+
+from utils.data_loader import load_ritase_by_front, apply_global_filters, load_produksi
+from utils.helpers import get_chart_layout
+
+def show_ritase():
+    """Hauling & Logistics Analysis - Professional Edition"""
+    
+    # Page Header
+    st.markdown("""
+    <style>
+    /* FORCE OVERRIDE FOR CONTAINERS */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        /* VISIBLE CONTRAST CARD STYLE */
+        background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+    }
+    </style>
+    
+    <div class="page-header">
+        <div class="page-header-icon">🚛</div>
+        <div class="page-header-text">
+            <h1>Analisis Ritase</h1>
+            <p>Monitoring Logistik, Efisiensi Truk & Distribusi Material</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 1. LOAD DATA
+    # ----------------------------------------
+    with st.spinner("Loading Hauling Data..."):
+        df_prod = load_produksi()
+        df_prod = apply_global_filters(df_prod)
+        
+    if df_prod.empty:
+        st.warning("⚠️ Data produksi/ritase tidak tersedia untuk periode ini.")
+        return
+
+    # 2. KPI CALCULATIONS (TARGET VS ACTUAL)
+    # ----------------------------------------
+    from config import DAILY_PRODUCTION_TARGET  # Import Target
+    
+    total_rit = df_prod['Rit'].sum()
+    total_ton = df_prod['Tonnase'].sum()
+    total_days = df_prod['Date'].nunique()
+    if total_days < 1: total_days = 1
+    
+    # Target Calculation
+    target_period = DAILY_PRODUCTION_TARGET * total_days
+    achievement_pct = (total_ton / target_period * 100) if target_period > 0 else 0
+    
+    # Avg load per trip
+    avg_load = total_ton / total_rit if total_rit > 0 else 0
+    
+    # Determine Status Color
+    if achievement_pct >= 100:
+        status_color = "#10b981" # Green
+        status_icon = "✅"
+    elif achievement_pct >= 90:
+        status_color = "#3b82f6" # Blue
+        status_icon = "🔵"
+    elif achievement_pct >= 75:
+        status_color = "#f59e0b" # Orange
+        status_icon = "⚠️"
+    else:
+        status_color = "#ef4444" # Red
+        status_icon = "🔻"
+    
+    # 3. KPI CARDS (PROFESSIONAL)
+    # ----------------------------------------
+    st.markdown(f"""
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
+        <div class="kpi-card" style="--card-accent: #d4a84b;">
+            <div class="kpi-icon">🚛</div>
+            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-value">{total_rit:,.0f}</div>
+            <div class="kpi-subtitle">Ritase (Semua Shift)</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #3b82f6;">
+            <div class="kpi-icon">📦</div>
+            <div class="kpi-label">Total Volume</div>
+            <div class="kpi-value">{total_ton:,.0f}</div>
+            <div class="kpi-subtitle">Ton Material</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: {status_color};">
+            <div class="kpi-icon">{status_icon}</div>
+            <div class="kpi-label">Pencapaian</div>
+            <div class="kpi-value">{achievement_pct:.1f}%</div>
+            <div class="kpi-subtitle">Target: {target_period/1000:,.0f}k Ton</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #8b5cf6;">
+            <div class="kpi-icon">⚖️</div>
+            <div class="kpi-label">Rata-rata Muatan</div>
+            <div class="kpi-value">{avg_load:.1f}</div>
+            <div class="kpi-subtitle">Ton / Rit</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 4. DETAILED ANALYSIS (GRID LAYOUT)
+    # ----------------------------------------
+    
+    # ROW 1: Daily Trend with TARGET LINE
+    with st.container(border=True):
+        st.markdown("##### 📈 **ANALISIS TREN** | Realisasi vs Target Harian")
+        st.markdown("---")
+        
+        # Aggregate Daily
+        rit_daily = df_prod.groupby('Date').agg({'Rit': 'sum', 'Tonnase': 'sum'}).reset_index()
+        
+        fig_trend = go.Figure()
+        
+        # 1. Bar: Actual Ritase
+        fig_trend.add_trace(go.Bar(
+            x=rit_daily['Date'], 
+            y=rit_daily['Rit'],
+            name='Total Ritase',
+            marker_color='#d4a84b', # Gold
+            opacity=0.8,
+            hovertemplate='%{x|%d %b}: %{y} Trips<extra></extra>'
+        ))
+        
+        # 2. Line: Tonnase (Secondary Axis)
+        fig_trend.add_trace(go.Scatter(
+            x=rit_daily['Date'],
+            y=rit_daily['Tonnase'],
+            name='Total Tonase',
+            mode='lines+markers',
+            yaxis='y2',
+            line=dict(color='#3b82f6', width=3), # Blue
+            marker=dict(size=6, symbol='circle')
+        ))
+        
+        # 3. Line: Target (Constant)
+        fig_trend.add_trace(go.Scatter(
+            x=rit_daily['Date'],
+            y=[DAILY_PRODUCTION_TARGET] * len(rit_daily),
+            name='Target Rencana',
+            yaxis='y2',
+            mode='lines',
+            line=dict(color='#ef4444', width=2, dash='dash') # Red Dashed
+        ))
+        
+        # Standard professional layout first
+        fig_trend.update_layout(**get_chart_layout(height=400))
+        
+        # Specific overrides
+        fig_trend.update_layout(
+            title="Tren Ritase & Tonase vs Target",
+            xaxis=dict(title="Tanggal", tickformat='%d %b'),
+            yaxis=dict(title="Total Ritase (Bar)", side="left", showgrid=False),
+            yaxis2=dict(title="Tonase (Line)", side="right", overlaying="y", showgrid=True, gridcolor='rgba(255,255,255,0.1)'),
+            hovermode="x unified",
+            # Legend moved down (-0.5) to avoid overlapping
+            legend=dict(orientation="h", y=-0.5, x=0.5, xanchor="center"),
+            # Increased bottom margin (120px) to hold the legend
+            margin=dict(t=50, b=120, l=20, r=20)
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+    # ROW 2: Productivity (Hourly) & Fleet
+    col_left, col_right = st.columns([3, 2])
+    
+    with col_left:
+        with st.container(border=True):
+            st.markdown("##### ⏱️ **PRODUKTIVITAS PER JAM** | Rata-rata Tonase")
+            st.markdown("---")
+            
+            # Helper to extract hour
+            def get_hour_safe(t):
+               try:
+                   s = str(t)
+                   if ':' in s: return int(s.split(':')[0])
+                   return int(float(s))
+               except: return -1
+    
+            if 'Hour' not in df_prod.columns:
+                df_prod['Hour'] = df_prod['Time'].apply(get_hour_safe)
+            
+            valid_hours = df_prod[(df_prod['Hour'] >= 0) & (df_prod['Hour'] <= 23)]
+            
+            if not valid_hours.empty:
+                # Group by Hour: Sum Tonnase & Count Days to get Avg
+                hourly_perf = valid_hours.groupby('Hour')['Tonnase'].sum().reset_index()
+                hourly_perf['Avg_Ton_Hour'] = hourly_perf['Tonnase'] / total_days
+                
+                # Combo Chart: Avg Productivity
+                fig_h = go.Figure()
+                
+                fig_h.add_trace(go.Bar(
+                    x=hourly_perf['Hour'],
+                    y=hourly_perf['Avg_Ton_Hour'],
+                    name='Rata-rata Ton/Jam',
+                    marker_color='#3b82f6', # Professional Blue (No Gradient/Rainbow)
+                    text=hourly_perf['Avg_Ton_Hour'],
+                    texttemplate='%{text:,.0f}',
+                    textposition='auto'
+                ))
+                
+                fig_h.update_layout(
+                    xaxis=dict(tickmode='linear', dtick=1, title="Jam Operasional"),
+                    yaxis=dict(title="Rata-rata Produksi (Ton)"),
+                    showlegend=False,
+                    margin=dict(t=20, b=0, l=0, r=0)
+                )
+                fig_h.update_layout(**get_chart_layout(height=350))
+                st.plotly_chart(fig_h, use_container_width=True)
+            else:
+                st.warning("Data jam tidak tersedia.")
+
+    with col_right:
+        with st.container(border=True):
+            st.markdown("##### 🚛 **EFISIENSI ARMADA** | Top Unit")
+            st.markdown("---")
+            
+            if 'Dump Truck' in df_prod.columns:
+                # Top 10 Only to save space
+                truck_perf = df_prod.groupby('Dump Truck')['Rit'].sum().reset_index().sort_values('Rit', ascending=True)
+                if len(truck_perf) > 10: truck_perf = truck_perf.tail(10) 
+                
+                # Ensure it's treated as categorical string and add prefix if it looks like a number
+                truck_perf['Dump Truck'] = truck_perf['Dump Truck'].astype(str).apply(lambda x: f"DT-{x}" if x.replace('.','').isdigit() else x)
+                    
+                # Industrial Gold Theme
+                fig_truck = px.bar(truck_perf, y='Dump Truck', x='Rit', orientation='h',
+                             text_auto='.0f',
+                             color_discrete_sequence=['#d4a84b']) # Solid Gold
+                
+                fig_truck.update_layout(**get_chart_layout(height=350))
+                fig_truck.update_layout(
+                    xaxis_title="Total Ritase",
+                    yaxis_title="Unit Truck", # Explicit Label as requested
+                    yaxis=dict(type='category'), # Force categorical
+                    margin=dict(t=20, b=0, l=0, r=0)
+                )
+                st.plotly_chart(fig_truck, use_container_width=True)
+            else:
+                st.warning("Data Unit tidak tersedia.")
+
+    # ROW 3: Front & Shift (Side by Side)
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        with st.container(border=True):
+            st.markdown("##### 📍 **SOURCE** | Distribusi Front")
+            st.markdown("---")
+            
+            if 'Front' in df_prod.columns or 'BLOK' in df_prod.columns:
+                group_col = 'Front' if 'Front' in df_prod.columns and df_prod['Front'].nunique() > 1 else 'BLOK'
+                rit_front = df_prod.groupby(group_col)['Rit'].sum().reset_index().sort_values('Rit', ascending=True) # Ascending for BarH
+                
+                # REVISED: Horizontal Bar Chart for Ranking
+                fig_src = px.bar(rit_front, x='Rit', y=group_col, orientation='h',
+                                 text_auto='.0f',
+                                 color_discrete_sequence=['#10b981']) # Emerald Green (Production Source)
+                                   
+                fig_src.update_layout(**get_chart_layout(height=380))
+                # Removed reversed autorange to show highest at Top (because sort is Ascending)
+                # Plotly default: Ascending sort -> Smallest at Bottom, Largest at Top
+                fig_src.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                st.plotly_chart(fig_src, use_container_width=True)
+
+    with c2:
+        with st.container(border=True):
+            st.markdown("##### 🌓 **SHIFT** | Proporsi Shift")
+            st.markdown("---")
+             
+            if 'Shift' in df_prod.columns:
+                shift_rit = df_prod.groupby('Shift')['Rit'].sum().reset_index()
+                shift_rit['Shift'] = 'Shift ' + shift_rit['Shift'].astype(str).str.replace('Shift ', '')
+                
+                # Professional Colors
+                SHIFT_COLORS = {'Shift 1': '#d4a84b', 'Shift 2': '#3b82f6', 'Shift 3': '#10b981'}
+                
+                fig_shift = px.pie(shift_rit, values='Rit', names='Shift', 
+                                 hole=0.6,
+                                 color='Shift',
+                                 color_discrete_map=SHIFT_COLORS)
+                
+                fig_shift.update_traces(textposition='inside', textinfo='percent+label')
+                fig_shift.update_layout(**get_chart_layout(height=380))
+                fig_shift.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20),
+                                        annotations=[dict(text=f"{total_rit:,}<br>Trips", x=0.5, y=0.5, font_size=12, showarrow=False)])
+                
+                st.plotly_chart(fig_shift, use_container_width=True)
+
+    # 5. DETAILED TABLE
+    # ----------------------------------------
+    st.markdown("### 📋 Log Ritase Detail")
+    with st.expander("Lihat Data Tabel", expanded=True):
+        # Prepare Data for Display
+        display_df = df_prod.copy()
+        
+        # Format Date to String (YYYY-MM-DD)
+        if 'Date' in display_df.columns:
+            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
+            
+        # Select relevant columns for Ritase view
+        # Prioritize BLOK but fallback to Front if BLOK missing
+        cols = ['Date', 'Time', 'Shift', 'Excavator', 'Dump Truck', 'Front', 'BLOK', 'Rit', 'Tonnase']
+        
+        # Filter existing columns
+        show_cols = [c for c in cols if c in display_df.columns]
+        
+        # LOGIC MATCHING PRODUKSI: Reverse Order (Last Excel Row -> First)
+        # Instead of sorting by Date/Time, we simply reverse the dataframe
+        # assuming Excel is chronological top-to-bottom.
+        display_df = display_df.iloc[::-1]
+        
+        st.dataframe(display_df[show_cols], use_container_width=True)
+        
+        csv = display_df[show_cols].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Data Ritase",
+            data=csv,
+            file_name=f"ritase_log_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )

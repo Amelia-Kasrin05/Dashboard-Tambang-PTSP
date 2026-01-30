@@ -1,109 +1,90 @@
 # ============================================================
-# SETTINGS - User & Theme Configuration
+# SETTINGS - Centralized Configuration
 # ============================================================
-
-import hashlib
 import os
+import hashlib
+from pathlib import Path
 
 # ============================================================
-# PASSWORD HASHING UTILITY
+# 1. PATHS & ENVIRONMENT
 # ============================================================
+BASE_DIR = Path(__file__).parent.parent.absolute()
+ASSETS_DIR = BASE_DIR / "assets"
 
-def hash_password(password: str) -> str:
-    """Hash password using SHA-256 with salt"""
-    salt = "SemenPadangMining2025"  # Static salt for simplicity
-    salted = f"{salt}{password}{salt}"
-    return hashlib.sha256(salted.encode()).hexdigest()
+# User Data Paths
+USER_HOME = Path.home()
+ONEDRIVE_PATH = USER_HOME / "OneDrive" / "Dashboard_Tambang"
 
-def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against hash"""
+DEFAULT_EXCEL_PATH = str(ONEDRIVE_PATH / "Monitoring.xlsx")
+PRODUKSI_EXCEL_PATH = str(ONEDRIVE_PATH / "Produksi_UTSG_Harian.xlsx")
+GANGGUAN_EXCEL_PATH = str(ONEDRIVE_PATH / "Gangguan_Produksi.xlsx")
+
+MONITORING_EXCEL_PATH = os.getenv("MONITORING_FILE", DEFAULT_EXCEL_PATH)
+PRODUKSI_FILE = os.getenv("PRODUKSI_FILE", PRODUKSI_EXCEL_PATH)
+GANGGUAN_FILE = os.getenv("GANGGUAN_FILE", GANGGUAN_EXCEL_PATH)
+CACHE_TTL = 300
+
+def get_monitoring_path():
+    if os.path.exists(MONITORING_EXCEL_PATH):
+        return MONITORING_EXCEL_PATH
+    return None
+
+def get_assets_path(filename):
+    return str(ASSETS_DIR / filename)
+
+# ============================================================
+# 2. AUTHENTICATION & USERS
+# ============================================================
+def hash_password(password):
+    return hashlib.sha256(str(password).encode()).hexdigest()
+
+def verify_password(password, hashed):
     return hash_password(password) == hashed
 
-# ============================================================
-# USER CREDENTIALS (Hashed passwords)
-# ============================================================
-# Note: Run hash_password("your_password") to generate hash for new users
-
-# Pre-computed hashes for existing passwords:
-# hash_password("super123") -> "..."
-# hash_password("prod123") -> "..."
-# etc.
-
 USERS = {
-    "supervisor": {
-        "password_hash": hash_password("super123"),
-        "role": "supervisor", 
-        "name": "Supervisor Tambang"
-    },
     "admin_produksi": {
-        "password_hash": hash_password("prod123"),
-        "role": "produksi", 
-        "name": "Admin Produksi"
+        "name": "Admin Produksi",
+        "role": "admin",
+        # Hashed 'admin' (Temporary Reset)
+        "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
     },
-    "admin_alat": {
-        "password_hash": hash_password("alat123"),
-        "role": "alat", 
-        "name": "Admin Alat"
-    },
-    "admin_bbm": {
-        "password_hash": hash_password("bbm123"),
-        "role": "bbm", 
-        "name": "Admin BBM"
-    },
-    "admin_planning": {
-        "password_hash": hash_password("plan123"),
-        "role": "planning", 
-        "name": "Admin Planning"
-    },
-    "admin_safety": {
-        "password_hash": hash_password("safety123"),
-        "role": "safety", 
-        "name": "Admin Safety"
-    },
+    "guest": {
+        "name": "Tamu",
+        "role": "viewer",
+        "password_hash": hash_password("guest")
+    }
 }
 
 # ============================================================
-# COLOR CONFIGURATION
+# 3. VISUAL STYLING (COLORS)
 # ============================================================
-
-COLORS = {
-    "primary": "#00C853",
-    "secondary": "#2196F3",
-    "danger": "#FF5252",
-    "warning": "#FFD600",
-    "info": "#00BCD4",
-    "dark": "#1a1a2e",
-    "card": "#16213e",
+MINING_COLORS = {
+    'gold': '#d4a84b', 
+    'blue': '#3b82f6', 
+    'green': '#10b981', 
+    'red': '#ef4444',
+    'dark': '#0a1628',
+    'light': '#f1f5f9'
 }
+
+COLORS = MINING_COLORS  # Alias
 
 CHART_COLORS = [
-    "#00E676", "#2979FF", "#FF6D00",
-    "#D500F9", "#FFEA00", "#00E5FF",
-    "#FF1744", "#76FF03"
+    '#d4a84b', '#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899'
 ]
 
-# Mining color palette for charts
-MINING_COLORS = {
-    'gold': '#d4a84b',
-    'blue': '#3b82f6',
-    'green': '#10b981',
-    'red': '#ef4444',
-    'orange': '#f59e0b',
-    'purple': '#8b5cf6',
-    'cyan': '#06b6d4',
-    'slate': '#64748b'
-}
-
-CHART_SEQUENCE = [
-    '#d4a84b', '#3b82f6', '#10b981', '#f59e0b', 
-    '#8b5cf6', '#06b6d4', '#ef4444', '#ec4899'
-]
+CHART_SEQUENCE = CHART_COLORS
 
 # ============================================================
-# PRODUCTION TARGETS
+# 4. OPERATIONAL CONSTANTS
 # ============================================================
+APP_TITLE = "Mining Dashboard | Semen Padang"
+APP_ICON = str(ASSETS_DIR / "logo_semen_padang.jpg")
 
-DAILY_PRODUCTION_TARGET = 18000  # Target produksi harian dalam ton
-DAILY_INTERNAL_TARGET = 25000  # Target internal harian dalam ton
-SHIFT_HOURS = 8  # Jam kerja per shift
-SHIFTS_PER_DAY = 3  # Jumlah shift per hari
+# Production Targets (Default Placeholders)
+DAILY_PRODUCTION_TARGET = 18000  # Ton (Plan)
+DAILY_INTERNAL_TARGET = 25000    # Ton (Internal)
+
+# Shift Configuration
+SHIFT_HOURS = 8
+SHIFTS_PER_DAY = 3

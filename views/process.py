@@ -1,0 +1,215 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from utils.data_loader import load_stockpile_hopper, apply_global_filters
+from utils.helpers import get_chart_layout
+from datetime import datetime
+
+def format_number(num):
+    if num >= 1_000_000:
+        return f"{num/1_000_000:.2f}M"
+    elif num >= 1_000:
+        return f"{num/1_000:.1f}K"
+    return f"{num:,.0f}"
+
+def show_process():
+    # Page Header
+    st.markdown("""
+    <div class="page-header">
+        <div class="page-header-icon">⚙️</div>
+        <div class="page-header-text">
+            <h1>Stockpile & Process</h1>
+            <p>Monitoring Arus Material & Utilitas Aset Crusher Feeding</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 1. LOAD DATA
+    with st.spinner("Loading Process Data..."):
+        df_hopper = load_stockpile_hopper()
+        
+    if df_hopper.empty:
+        st.warning("⚠️ Data Stockpile Hopper tidak tersedia atau format tidak sesuai.")
+        st.info("Pastikan sheet 'Stockpile Hopper' memiliki kolom: Date, Time, Shift, Dumping, Ritase, Rit.")
+        return
+
+    # 2. FILTER DATA (Date & Shift)
+    df_filtered = apply_global_filters(df_hopper, date_col='Tanggal')
+
+    if df_filtered.empty:
+        st.warning("⚠️ Tidak ada data untuk filter yang dipilih.")
+        return
+
+    # Debug: Check columns (New Schema)
+    required_cols = ['Ritase', 'Loader', 'Unit', 'Jam']
+    missing = [c for c in required_cols if c not in df_filtered.columns]
+    if missing:
+        st.error(f"⚠️ Missing Columns: {missing}")
+        st.write("Available Columns:", df_filtered.columns.tolist())
+        return
+
+    # 3. ANALYSIS & KPI
+    total_rit = df_filtered['Ritase'].sum()
+    
+    # Calculate Operating Hours
+    op_hours = df_filtered['Jam'].nunique()
+    feeding_rate = (total_rit / op_hours) if op_hours > 0 else 0
+    
+    # Best Shift
+    shift_perf = df_filtered.groupby('Shift')['Ritase'].sum().sort_values(ascending=False)
+    best_shift = shift_perf.index[0] if not shift_perf.empty else "-"
+    best_shift_val = shift_perf.iloc[0] if not shift_perf.empty else 0
+    
+    # Active Fleet
+    active_loaders = df_filtered['Loader'].nunique()
+    active_haulers = df_filtered['Unit'].nunique() # "Unit" is now Hauler
+
+    # KPI CARDS
+    kpi_html = f"""
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
+        <div class="kpi-card" style="--card-accent: #3b82f6;">
+            <div class="kpi-icon">📉</div>
+            <div class="kpi-label">Total Volume</div>
+            <div class="kpi-value">{total_rit:,.0f}</div>
+            <div class="kpi-subtitle">Total Ritase</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #8b5cf6;">
+            <div class="kpi-icon">⚡</div>
+            <div class="kpi-label">Kecepatan Umpan</div>
+            <div class="kpi-value">{feeding_rate:,.0f}</div>
+            <div class="kpi-subtitle">Rit/Jam (Rata-rata)</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">🏆</div>
+            <div class="kpi-label">Shift Terbaik</div>
+            <div class="kpi-value">{best_shift}</div>
+            <div class="kpi-subtitle">{format_number(best_shift_val)} Rit</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #f59e0b;">
+            <div class="kpi-icon">🚜</div>
+            <div class="kpi-label">Armada Aktif</div>
+            <div class="kpi-value">{active_loaders}</div>
+            <div class="kpi-subtitle">Loader / {active_haulers} Hauler</div>
+        </div>
+    </div>
+    """
+    st.markdown(kpi_html, unsafe_allow_html=True)
+    
+    # 4. CHARTS
+    
+    # A. Hourly Rhythm (Area Chart)
+    hourly_rit = df_filtered.groupby('Jam')['Ritase'].sum().reset_index()
+    all_hours = pd.DataFrame({'Jam': range(24)})
+    hourly_rit = all_hours.merge(hourly_rit, on='Jam', how='left').fillna(0)
+    
+    fig_hourly = px.area(
+        hourly_rit, 
+        x='Jam', 
+        y='Ritase',
+        title="<b>📈 Pergerakan Per Jam (Hourly Rhythm)</b><br><span style='font-size: 12px; color: gray;'>Irama Operasi (Ritase per Jam)</span>",
+        labels={'Jam': 'Jam Operasi', 'Ritase': 'Ritase'},
+        color_discrete_sequence=['#3b82f6']
+    )
+    fig_hourly.update_traces(line_shape='spline', fill='tozeroy', fillcolor="rgba(59, 130, 246, 0.2)")
+    layout_hourly = get_chart_layout(height=400)
+    layout_hourly['xaxis'].update(dict(tickmode='linear', dtick=1, title="Jam Operasi"))
+    fig_hourly.update_layout(**layout_hourly)
+
+    # B. Shift Comparison
+    chart_shift_perf = df_filtered.groupby('Shift')['Ritase'].sum().reset_index()
+    fig_shift = px.bar(
+        chart_shift_perf, 
+        x='Shift', 
+        y='Ritase',
+        title="<b>📊 Performa Antar Shift</b><br><span style='font-size: 12px; color: gray;'>Perbandingan Produktivitas Regu</span>",
+        text='Ritase',
+        color='Shift',
+        color_discrete_sequence=px.colors.qualitative.Prism 
+    )
+    fig_shift.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+    fig_shift.update_layout(showlegend=False)
+    fig_shift.update_layout(**get_chart_layout(height=400))
+
+    # C. Loader Contribution (Was Unit)
+    # Using 'Loader' column
+    unit_perf = df_filtered.groupby('Loader')['Ritase'].sum().sort_values(ascending=True).reset_index()
+    fig_unit = px.bar(
+        unit_perf,
+        y='Loader',
+        x='Ritase',
+        title="<b>🚜 Peringkat Loader</b><br><span style='font-size: 12px; color: gray;'>Kontribusi per Alat Muat (Dumping)</span>",
+        orientation='h',
+        text='Ritase',
+        color_discrete_sequence=['#10b981']
+    )
+    fig_unit.update_traces(texttemplate='%{text}', textposition='outside')
+    fig_unit.update_layout(**get_chart_layout(height=380))
+    fig_unit.update_xaxes(showgrid=True, gridcolor='#333')
+
+    # D. Hauler Share (Was Hauler, Now Unit)
+    # Using 'Unit' column (Hauler/Vendor)
+    # Reverted to Donut Chart because data is categorical (HD, UTSG)
+    hauler_share = df_filtered.groupby('Unit')['Ritase'].sum().reset_index()
+    fig_hauler = px.pie(
+        hauler_share,
+        names='Unit',
+        values='Ritase',
+        title="<b>🚚 Proporsi Vendor/Unit</b><br><span style='font-size: 12px; color: gray;'>Porsi Ritase per Grup Unit</span>",
+        hole=0.4,
+        color_discrete_sequence=px.colors.qualitative.Safe
+    )
+    fig_hauler.update_traces(textposition='inside', textinfo='percent+label')
+    layout_hauler = get_chart_layout(height=380)
+    layout_hauler['legend'].update(dict(orientation="h", yanchor="bottom", y=-0.2))
+    fig_hauler.update_layout(**layout_hauler)
+
+    # LAYOUT GRID
+    col1, col2 = st.columns([1.5, 1])
+    with col1:
+        with st.container(border=True):
+            st.plotly_chart(fig_hourly, use_container_width=True)
+    with col2:
+        with st.container(border=True):
+            st.plotly_chart(fig_shift, use_container_width=True)
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        with st.container(border=True):
+            st.plotly_chart(fig_unit, use_container_width=True)
+    with col4:
+        with st.container(border=True):
+            st.plotly_chart(fig_hauler, use_container_width=True)
+
+    # RAW DATA PREVIEW
+    with st.expander("🔍 Lihat Data Detail", expanded=True):
+        # Prepare Display Dataframe
+        df_display = df_filtered.copy()
+        
+        # 1. Sort: Latest data first (Last Input First Output)
+        if 'Row_Order' in df_display.columns:
+            df_display = df_display.sort_values(by='Row_Order', ascending=False)
+        else:
+            df_display = df_display.sort_index(ascending=False)
+        
+        # 2. Format Date
+        df_display['Date'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d')
+        
+        # 3. Rename Columns to Match Excel Headers request:
+        # Internal -> External
+        # Loader -> Dumping
+        # Unit -> Unit (Hauler)
+        # Ritase -> Ritase (Count)
+        df_display = df_display.rename(columns={
+            'Jam_Range': 'Time',
+            'Loader': 'Dumping',
+            'Unit': 'Unit',
+            'Ritase': 'Ritase'
+        })
+        
+        # 4. Select Columns
+        cols_to_show = ['Date', 'Time', 'Shift', 'Dumping', 'Unit', 'Ritase']
+        # Filter only existing columns
+        cols_to_show = [c for c in cols_to_show if c in df_display.columns]
+        
+        st.dataframe(df_display[cols_to_show], use_container_width=True, hide_index=True)

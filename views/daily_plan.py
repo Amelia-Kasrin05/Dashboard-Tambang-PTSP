@@ -20,6 +20,12 @@ except ImportError:
     def get_grid_position(g, b=None): return None
     def get_zone_color(b): return '#00BFFF'
 
+# Import settings
+try:
+    from config.settings import CACHE_TTL
+except ImportError:
+    CACHE_TTL = 300
+
 # Import data loader as fallback
 try:
     from utils.data_loader import load_daily_plan as load_daily_plan_fallback
@@ -45,7 +51,7 @@ def load_daily_plan_data():
             # Read with header=2 (row 3 contains the actual headers)
             # CRITICAL FIX: Skip first column (column 0) which is empty/row numbers
             # Read all columns EXCEPT the first one to prevent column misalignment
-            df = pd.read_excel(ONEDRIVE_FILE, sheet_name='W22 Scheduling', header=2, usecols=lambda x: x != 'Unnamed: 0')
+            df = pd.read_excel(ONEDRIVE_FILE, sheet_name='Scheduling', header=2, usecols=lambda x: x != 'Unnamed: 0')
 
             
     except PermissionError:
@@ -167,6 +173,7 @@ def get_image_base64(image_path):
 # MAP VISUALIZATION
 # ============================================================
 
+@st.cache_data(ttl=CACHE_TTL)
 def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     """
     Create the mining map with strict logic matching user requirements:
@@ -180,7 +187,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     img_base64 = get_image_base64(MAP_IMAGE_PATH)
     
     if not img_base64:
-        return None
+        st.error("Gagal memuat gambar peta.")
+        return go.Figure()
     
     # Create figure
     fig = go.Figure()
@@ -230,16 +238,24 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         grid = str(row['Grid']).strip() if pd.notna(row['Grid']) else ''
         blok = str(row['Blok']).strip().upper() if pd.notna(row['Blok']) else ''
         
+        # Normalize Blok for comparison (remove spaces)
+        blok_clean = blok.replace(' ', '').replace('-', '').upper()
+        
+        # Rule: Blok SP6 / SP 6 overrides Grid choice -> Maps to K3
+        # Match SP6, STOCKPILE6, etc.
+        if 'SP6' in blok_clean or 'STOCKPILE6' in blok_clean:
+            return 'K3'
+            
+        # Rule: Blok SP3 / SP 3 overrides -> Maps to SP3 (Top Left)
+        if 'SP3' in blok_clean or 'STOCKPILE3' in blok_clean:
+            return 'SP3'
+        
         # Rule: Jika Grid terisi -> lokasi_id = Grid
         if grid and grid.lower() != 'nan':
             return grid
         
         # Rule: Jika Grid kosong dan Blok terisi -> lokasi_id = Blok
         if blok and blok.lower() != 'nan':
-            # Mapping Khusus: Blok SP6 -> Grid K3
-            if blok == 'SP6':
-                return 'K3'
-            # SP3 tetap SP3 (nanti dihandle get_grid_position)
             return blok
         
         return None
@@ -251,11 +267,7 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     # ------------------------------------------------------------
     # 3. GROUPING
     # ------------------------------------------------------------
-    # Gabungkan baris jika sama pada: Tanggal, lokasi_id, Alat Muat, Alat Angkut, ROM
-    # (Note: Filter Tanggal already applied upstream or in mask, assuming df_filtered is usually single day or we group by date too)
-    
     # Group fields
-    # USER REQUEST: Merge same equipment labels. Removed 'ROM' from grouping keys.
     group_cols = ['lokasi_id', 'Alat Muat', 'Alat Angkut']
     if 'Tanggal' in df_map.columns:
          group_cols.insert(0, 'Tanggal')
@@ -270,10 +282,12 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     # 4. PLOTTING & FORMATTING
     # ------------------------------------------------------------
     
-    # Track offset for collision handling
-    # Key: "x_y" -> count
-    offset_counter = {}
-
+    # Store all annotations to perform collision adjustment
+    annotations = []
+    
+    # COLOR SETTING: Lighter Blue (Reverted)
+    BOX_COLOR = '#00BFFF' 
+    
     for _, row in grouped.iterrows():
         loc_id = row['lokasi_id']
         alat_muat = row['Alat Muat']
@@ -284,11 +298,15 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         # Get Coordinates
         x, y = None, None
         
+        # SP3 Logic: If loc_id is strictly SP3, use specific coordinates
         if loc_id == 'SP3':
-            # SP3 in Top Left Corner - FORCE POSITION overrides
+            # SP3 in Top Left Corner - Hardcode if get_grid_position doesn't handle it
             pos = get_grid_position(loc_id, loc_id)
             if pos:
                 x, y = pos
+            else:
+                 # Fallback for SP3 if not in config: Top Left corner near N8 area
+                 x, y = 100, 100 
         else:
             # Use standard mapping
             pos = get_grid_position(loc_id)
@@ -298,7 +316,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         if x is None or y is None:
             continue
             
-        # Flip Y for plotting
+        # Flip Y for plotting (Map coords usually origin top-left, Plotly origin bottom-left)
+        # Assuming MAP_HEIGHT is correct height
         y_plot = MAP_HEIGHT - y
         
         # Format Text
@@ -315,118 +334,162 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         line2 = f"Shift {shift_str}"
         
         # Line 3: LS> <ROM> (Combined)
-        # Filter empty ROMs just in case
         valid_roms = [str(r) for r in rom_list if pd.notna(r) and str(r).strip() not in ['', 'nan', 'None']]
-        # Unique ROMs only (set) then sort
         unique_roms = sorted(list(set(valid_roms)))
-        
         rom_str = " & ".join(unique_roms)
         line3 = f"LS> {rom_str}"
         
         # Combined Box Text
         box_text = f"{line1}<br>{line2}<br>{line3}"
         
-        # --------------------------------------------------------
-        # NATURAL OFFSET LOGIC WITH BOUNDARY CLAMPING
-        # --------------------------------------------------------
+        annotations.append({
+            'x': x,
+            'y': y_plot,
+            'text': box_text,
+            'loc_id': loc_id,
+            'color': BOX_COLOR 
+        })
+
+    # COLLISION AVOIDANCE ALGORITHM
+    # Sort by Y (top to bottom) then X (left to right)
+    annotations.sort(key=lambda k: (-k['y'], k['x']))
+    
+    # Simple bounding box representation
+    # Assume box size approx 120x70
+    BOX_W = 140 # Increased more for safety padding
+    BOX_H = 90  # Increased more for safety vertical padding
+    
+    placed_boxes = [] # List of {'x', 'y', 'w', 'h'} representing occupied LABEL space
+    
+    for ann in annotations:
+        target_x, target_y = ann['x'], ann['y']
         
-        target_x, target_y = x, y_plot
-        
-        # Determine Direction preference
-        
-        # SPECIAL OVERRIDES
-        if loc_id == 'N8':
-            direction = -1 # Force LEFT for N8 as requested
+        # Determine preferred direction
+        # N8 Special Case -> LEFT
+        if ann['loc_id'] == 'N8':
+             direction = -1
+        # SP3 Special Case -> RIGHT (so it doesn't go off screen left)
+        elif ann['loc_id'] == 'SP3':
+             direction = 1 
+        elif target_x < 200: direction = 1 # RIGHT (near left edge)
+        elif target_x > MAP_WIDTH - 200: direction = -1 # LEFT (near right edge)
+        else:
+            # Default split
+            direction = -1 if target_x < 450 else 1
             
-        # GENERAL LOGIC
-        elif x < 100: direction = 1
-        elif x > MAP_WIDTH - 100: direction = -1
-        else: 
-            # User requested Grid 7+ (A7..P7, x approx 437) to face RIGHT.
-            # Grid 6 is x approx 390.
-            # So split at 410 ensures Col 1-6 (Space for SP6/K3) are LEFT, and Col 7+ are RIGHT.
-            direction = -1 if x < 410 else 1
+        # Initial Label Position Candidate
+        # INCREASED DISTANCE so box doesn't overlap the elbow line
+        # Box Half Width = 70. Elbow dist = 30.
+        # Min dist = 70 + 30 + buffer = ~120
+        offset_dist = 150 
         
-        # Calculate Label Position
-        # Reduced offset to keep labels tieter and fit better
-        offset_dist = 120 
-        label_x = x + (direction * offset_dist)
+        label_x = target_x + (direction * offset_dist)
+        label_y = target_y # Start at same level
         
-        # CLAMP X to be inside map
-        # Reduced box width to 100px (half 50) + Margin 10 = 60
-        BOX_HALF_WIDTH = 50 
-        X_MARGIN = 10
-        MIN_X = BOX_HALF_WIDTH + X_MARGIN     # 60
-        MAX_X = MAP_WIDTH - BOX_HALF_WIDTH - X_MARGIN # 1340
+        # Try to place label, adjusting Y if collision
+        # Candidate positions: Center, Up, Down, Further Up, Further Down...
+        # Increased steps for better spreading
+        candidates = [0, 80, -80, 160, -160, 240, -240]
         
-        if label_x < MIN_X: label_x = MIN_X
-        if label_x > MAX_X: label_x = MAX_X
+        best_x, best_y = label_x, label_y
+        found_spot = False
         
-        # Vertical Stacking Logic
-        y_bucket = round(y_plot / 50) * 50
-        y_key = f"{direction}_{y_bucket}"
+        for dy in candidates:
+            test_x = label_x
+            test_y = label_y + dy
+            
+            # Boundary check
+            if test_x < BOX_W/2 or test_x > MAP_WIDTH - BOX_W/2: continue
+            if test_y < BOX_H/2 or test_y > MAP_HEIGHT - BOX_H/2: continue
+            
+            # Collision check with existing LABELS
+            collision = False
+            for box in placed_boxes:
+                # Check overlap: abs(dx) * 2 < (w1 + w2) && abs(dy) * 2 < (h1 + h2)
+                # w1+w2 here includes the built-in padding in BOX_W/H
+                if (abs(test_x - box['x']) * 2 < (BOX_W + box['w']) and 
+                    abs(test_y - box['y']) * 2 < (BOX_H + box['h'])):
+                    collision = True
+                    break
+            
+            if not collision:
+                best_x, best_y = test_x, test_y
+                found_spot = True
+                # If we moved Y significantly, maybe push X out a bit too to make corner cleaner
+                if abs(dy) > 0:
+                     best_x = label_x + (direction * 10) 
+                break
         
-        offset_counter[y_key] = offset_counter.get(y_key, 0) + 1
-        stack_idx = offset_counter[y_key] - 1
+        # If no spot found (very crowded), just take the furthest offset or fallback
+        # Shift X out further to try and clear it
+        if not found_spot:
+             best_x = label_x + (direction * 80) # Push out more
+             best_y = label_y # reset Y
         
-        # Default Y behavior
-        label_y = y_plot - (stack_idx * 55)
+        # --- STRICT BOUNDARY CLAMPING ---
+        # Ensure label stays strictly inside map
+        margin_x = BOX_W / 2 + 10
+        margin_y = BOX_H / 2 + 10
         
-        # SPECIAL HANDLING FOR CORNERS (e.g. SP3 Top Left)
-        if y_plot > MAP_HEIGHT - 100: # Very close to TOP
-             # Force label DOWN
-             label_y = y_plot - 80 - (stack_idx * 55)
-             
-        # Clamp Y
-        # Box height approx 50-60px -> Half height 30px -> Buffer 10px
-        Y_MARGIN = 10
-        BOX_HALF_HEIGHT = 30 
+        if best_x < margin_x: best_x = margin_x
+        if best_x > MAP_WIDTH - margin_x: best_x = MAP_WIDTH - margin_x
+        if best_y < margin_y: best_y = margin_y
+        if best_y > MAP_HEIGHT - margin_y: best_y = MAP_HEIGHT - margin_y
         
-        MIN_Y = BOX_HALF_HEIGHT + Y_MARGIN
-        MAX_Y = MAP_HEIGHT - BOX_HALF_HEIGHT - Y_MARGIN
+        # Register placed box
+        placed_boxes.append({'x': best_x, 'y': best_y, 'w': BOX_W, 'h': BOX_H})
         
-        if label_y < MIN_Y: label_y = MIN_Y
-        if label_y > MAX_Y: label_y = MAX_Y
+        # Create Path
+        # Determine elbow point
+        elbow_dist = 30
+        elbow_x = target_x + (direction * elbow_dist)
         
-        # Elbow Path construction
-        elbow_x = x + (direction * 30) # Short stub reduced
+        # Calculate Box Edge Intersection point for clean line connection
+        # If box is to right (dir=1), line enters Left Edge (center - width/2)
+        # If box is to left (dir=-1), line enters Right Edge (center + width/2)
+        # We use a narrower box width for visual connector (100px) to ensure it tucks in
+        visual_box_w = 110
         
-        # Path: Dot -> Stub -> Vertical -> Label
-        path_svg = f"M {target_x},{target_y} L {elbow_x},{target_y} L {elbow_x},{label_y} L {label_x},{label_y}"
+        # Determine effective direction based on final position vs target
+        final_dir = 1 if best_x > target_x else -1
+        box_edge_x = best_x - (final_dir * (visual_box_w / 2 - 5)) 
         
-        # Draw Elbow Line (Blue)
+        path_svg = f"M {target_x},{target_y} L {elbow_x},{target_y} L {elbow_x},{best_y} L {box_edge_x},{best_y}"
+        
+        # Add to Figure
+        # 1. Elbow Line
         fig.add_shape(
             type="path",
             path=path_svg,
-            line=dict(color='#00BFFF', width=2),
-            layer="above"
+            line=dict(color=ann['color'], width=2),
+            layer="above" # Draw ABOVE map, visible, but clipped to box edge
         )
         
-        # Add Annotation Box
+        # 2. Box Annotation
         fig.add_annotation(
-            x=label_x,
-            y=label_y, 
-            text=box_text,
+            x=best_x,
+            y=best_y, 
+            text=ann['text'],
             showarrow=False, 
-            bgcolor='#00BFFF', 
+            bgcolor=ann['color'], 
             bordercolor='white',
             borderwidth=1,
             borderpad=4,
-            # Reduced font size to 8 as requested
-            font=dict(size=8, color='black', family='Arial, sans-serif'),
-            opacity=1.0, 
+            font=dict(size=9, color='black', family='Arial, sans-serif'), # Revert to black text
+            opacity=0.9, 
             align='center',
             captureevents=True,
-            width=100
+            width=visual_box_w
         )
         
-        # Add Marker Dot
+        # 3. Target Dot
         fig.add_trace(go.Scatter(
             x=[target_x],
             y=[target_y],
             mode='markers',
-            marker=dict(size=10, color='#00BFFF', line=dict(color='white', width=2)),
-            hoverinfo='skip',
+            marker=dict(size=12, color=ann['color'], line=dict(color='white', width=2)),
+            hoverinfo='text',
+            hovertext=ann['loc_id'],
             showlegend=False
         ))
     
@@ -579,13 +642,37 @@ def show_daily_plan():
     df = load_daily_plan_data()
     
     if df.empty:
-        st.warning("⚠️ Data Daily Plan tidak tersedia. Pastikan file Excel tidak sedang dibuka.")
+        st.warning("⚠️ Data Rencana Harian tidak tersedia. Pastikan file Excel ditutup.")
         return
     
     # ============================================================
     # HEADER
     # ============================================================
+    # ============================================================
+    # HEADER
+    # ============================================================
     st.markdown("""
+    <style>
+    /* FORCE OVERRIDE FOR CONTAINERS */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        /* VISIBLE CONTRAST CARD STYLE */
+        background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+       pointer-events: auto; 
+    }
+    </style>
+    
     <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
                 padding: 20px; border-radius: 12px; margin-bottom: 20px;
                 border-left: 4px solid #00D4FF;">
@@ -598,17 +685,7 @@ def show_daily_plan():
     </div>
     """, unsafe_allow_html=True)
     
-    # DEBUG: Show data sample
-    with st.expander("🔧 Debug Info - Klik untuk lihat"):
-        st.write("**Kolom Hari (5 baris pertama):**")
-        if 'Hari' in df.columns:
-            st.write(df['Hari'].head().tolist())
-            st.write(f"Tipe data: {df['Hari'].dtype}")
-        st.write("\n**Kolom Tanggal (5 baris pertama):**")
-        if 'Tanggal' in df.columns:
-            st.write(df['Tanggal'].head().tolist())
-        st.write(f"\n**Total rows:** {len(df)}")
-        st.write(f"**Kolom:** {df.columns.tolist()}")
+    # DEBUG: Show data sample - REMOVED per user request
 
     
     # ============================================================
@@ -637,8 +714,6 @@ def show_daily_plan():
             selected_date = st.date_input(
                 "Tanggal",
                 value=available_dates[0],
-                min_value=min(available_dates),
-                max_value=max(available_dates),
                 key='dp_date',
                 label_visibility="collapsed"
             )

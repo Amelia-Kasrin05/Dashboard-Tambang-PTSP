@@ -2,507 +2,352 @@
 # PRODUKSI - Professional Mining Production Dashboard
 # ============================================================
 # Industry-grade mining operations monitoring
-# Version 2.0 - Enhanced with professional KPIs and charts
+# Version 3.0 - Global Filters, Heatmap, and Download
 
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import pandas as pd
-from datetime import timedelta
+from datetime import datetime
 
-from config import CHART_SEQUENCE, DAILY_PRODUCTION_TARGET, DAILY_INTERNAL_TARGET, SHIFT_HOURS, SHIFTS_PER_DAY
-from utils import load_produksi
+from config import CHART_SEQUENCE, DAILY_PRODUCTION_TARGET, DAILY_INTERNAL_TARGET
+from utils.data_loader import load_produksi, apply_global_filters
 from utils.helpers import get_chart_layout
 
 
 def show_produksi():
     """Professional Mining Production Dashboard"""
     
-    # Page Header
+    # Page Header (Consistent with Ritase)
     st.markdown("""
+    <style>
+    /* FORCE OVERRIDE FOR CONTAINERS */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        /* VISIBLE CONTRAST CARD STYLE */
+        background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+       pointer-events: auto; 
+    }
+    </style>
+
     <div class="page-header">
         <div class="page-header-icon">⛏️</div>
         <div class="page-header-text">
-            <h1>Production Analytics</h1>
-            <p>Real-time production monitoring and performance analysis</p>
+            <h1>Produksi Tambang</h1>
+            <p>Monitoring Produksi Harian, Kinerja Unit & Distribusi Material</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    df = load_produksi()
-    
-    if df.empty:
-        st.warning("⚠️ Data produksi tidak tersedia. Pastikan file Excel sudah terhubung.")
+    # 1. LOAD & FILTER DATA
+    # ----------------------------------------
+    with st.spinner("Loading Production Data..."):
+        df_prod = load_produksi()
+        df_prod = apply_global_filters(df_prod)
+        
+    if df_prod.empty:
+        st.warning("⚠️ Data produksi tidak tersedia atau kosong setelah difilter.")
         return
+        
+    # Pre-process Data for Analytics
+    try:
+        df_prod['TimeStr'] = df_prod['Time'].astype(str).str.strip()
+        def get_hour(t_str):
+            try:
+                if ':' in t_str: return int(t_str.split(':')[0])
+                return int(float(t_str))
+            except: return -1
+        df_prod['Hour'] = df_prod['TimeStr'].apply(get_hour)
+        df_prod_valid_time = df_prod[(df_prod['Hour'] >= 0) & (df_prod['Hour'] <= 23)]
+    except Exception as e:
+        st.error(f"Error processing Time column: {e}")
+        df_prod['Hour'] = 0
+        df_prod_valid_time = df_prod
+        
+    # 2. KPI CALCULATIONS (TARGET VS ACTUAL)
+    # ----------------------------------------
+    total_prod = df_prod['Tonnase'].sum()
+    total_rit = df_prod['Rit'].sum()
+    total_days = df_prod['Date'].nunique()
+    if total_days < 1: total_days = 1
     
-    # ===== FILTER SECTION =====
-    min_date, max_date = df['Date'].min(), df['Date'].max()
+    # Target Logic
+    target_period = DAILY_PRODUCTION_TARGET * total_days
+    achievement_pct = (total_prod / target_period * 100) if target_period > 0 else 0
     
-    st.markdown("""
-    <div class="chart-container" style="padding: 1rem;">
-        <div class="chart-header">
-            <span class="chart-title">🔍 Filter & Analysis Period</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Productivity Logic
+    total_machine_hours = len(df_prod[df_prod['Tonnase'] > 0]) # Approximation
+    avg_speed = (total_prod / total_machine_hours) if total_machine_hours > 0 else 0
     
-    # Row 1: Date range
-    col_d1, col_d2, col_spacer = st.columns([2, 2, 4])
-    
-    with col_d1:
-        start_date = st.date_input("Dari", min_date, min_value=min_date, max_value=max_date, key="prod_start_input")
-    with col_d2:
-        end_date = st.date_input("Sampai", max_date, min_value=min_date, max_value=max_date, key="prod_end_input")
-    
-    # Row 2: Main filters - MULTI-SELECT
-    col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
-    
-    with col_f1:
-        shifts = sorted(df['Shift'].dropna().unique().tolist())
-        selected_shifts = st.multiselect("Shift", shifts, default=[], placeholder="Semua", key="prod_shift")
-    with col_f2:
-        materials = sorted(df['Commudity'].dropna().unique().tolist())
-        selected_mats = st.multiselect("Material", materials, default=[], placeholder="Semua", key="prod_mat")
-    with col_f3:
-        excavators = sorted(df['Excavator'].dropna().unique().tolist())
-        selected_excs = st.multiselect("Excavator", excavators, default=[], placeholder="Semua", key="prod_exc")
-    with col_f4:
-        bloks = sorted(df['BLOK'].dropna().unique().tolist())
-        selected_bloks = st.multiselect("BLOK", bloks, default=[], placeholder="Semua", key="prod_blok")
-    with col_f5:
-        fronts = sorted(df['Front'].dropna().unique().tolist())
-        selected_fronts = st.multiselect("Front", fronts, default=[], placeholder="Semua", key="prod_front")
-    
-    # Apply all filters (empty list = show all)
-    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
-    if selected_shifts:
-        mask &= df['Shift'].isin(selected_shifts)
-    if selected_mats:
-        mask &= df['Commudity'].isin(selected_mats)
-    if selected_excs:
-        mask &= df['Excavator'].isin(selected_excs)
-    if selected_bloks:
-        mask &= df['BLOK'].isin(selected_bloks)
-    if selected_fronts:
-        mask &= df['Front'].isin(selected_fronts)
-    
-    df_filtered = df[mask].copy()
-    
-    # ===== CALCULATE METRICS =====
-    total_days = df_filtered['Date'].nunique()
-    total_rit = df_filtered['Rit'].sum()
-    total_ton = df_filtered['Tonnase'].sum()
-    total_exc = df_filtered['Excavator'].nunique()
-    total_dt = df_filtered['Dump Truck'].nunique()
-    
-    # Calculate daily tonnage for target analysis
-    daily_tonnage = df_filtered.groupby('Date')['Tonnase'].sum()
-    days_above_target = (daily_tonnage >= DAILY_PRODUCTION_TARGET).sum()
-    days_above_internal = (daily_tonnage >= DAILY_INTERNAL_TARGET).sum()
-    
-    # Target calculations
-    target_total = DAILY_PRODUCTION_TARGET * total_days if total_days > 0 else DAILY_PRODUCTION_TARGET
-    internal_total = DAILY_INTERNAL_TARGET * total_days if total_days > 0 else DAILY_INTERNAL_TARGET
-    achievement_pct = (total_ton / target_total * 100) if target_total > 0 else 0
-    achievement_internal_pct = (total_ton / internal_total * 100) if internal_total > 0 else 0
-    
-    # Productivity
-    avg_daily = total_ton / total_days if total_days > 0 else 0
-    avg_per_trip = total_ton / total_rit if total_rit > 0 else 0
-    
-    # ===== KPI CARDS - 6 CARDS =====
-    # Achievement color logic
+    # Determine Status
     if achievement_pct >= 100:
-        ach_color, ach_icon = "#10b981", "✓"
-    elif achievement_pct >= 85:
-        ach_color, ach_icon = "#f59e0b", "◆"
+        status_color, status_icon = "#10b981", "✅" # Green
+    elif achievement_pct >= 90:
+        status_color, status_icon = "#3b82f6", "🔵" # Blue
+    elif achievement_pct >= 75:
+        status_color, status_icon = "#f59e0b", "⚠️" # Orange
     else:
-        ach_color, ach_icon = "#ef4444", "!"
+        status_color, status_icon = "#ef4444", "🔻" # Red
     
-    # Internal achievement color
-    if achievement_internal_pct >= 100:
-        int_color, int_icon = "#10b981", "✓"
-    elif achievement_internal_pct >= 85:
-        int_color, int_icon = "#f59e0b", "◆"
-    else:
-        int_color, int_icon = "#ef4444", "!"
-    
-    # Days achieved color
-    days_pct = (days_above_target / total_days * 100) if total_days > 0 else 0
-    if days_pct >= 80:
-        days_color = "#10b981"
-    elif days_pct >= 60:
-        days_color = "#f59e0b"
-    else:
-        days_color = "#ef4444"
-    
+    # 3. KPI CARDS
+    # ----------------------------------------
+    # 3. KPI CARDS
+    # ----------------------------------------
     st.markdown(f"""
-    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; margin: 1rem 0;">
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
-            <div class="kpi-icon">📊</div>
+            <div class="kpi-icon">⛏️</div>
             <div class="kpi-label">Total Produksi</div>
-            <div class="kpi-value">{total_ton:,.0f}</div>
-            <div class="kpi-subtitle">ton ({total_days} hari)</div>
+            <div class="kpi-value">{total_prod:,.0f}</div>
+            <div class="kpi-subtitle">Ton Material</div>
         </div>
-        <div class="kpi-card" style="--card-accent: {ach_color};">
-            <div class="kpi-icon">{ach_icon}</div>
-            <div class="kpi-label">vs Target ({DAILY_PRODUCTION_TARGET:,})</div>
+        <div class="kpi-card" style="--card-accent: {status_color};">
+            <div class="kpi-icon">{status_icon}</div>
+            <div class="kpi-label">Pencapaian</div>
             <div class="kpi-value">{achievement_pct:.1f}%</div>
-            <div class="kpi-subtitle">target: {target_total:,.0f} ton</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: {int_color};">
-            <div class="kpi-icon">{int_icon}</div>
-            <div class="kpi-label">vs Internal ({DAILY_INTERNAL_TARGET:,})</div>
-            <div class="kpi-value">{achievement_internal_pct:.1f}%</div>
-            <div class="kpi-subtitle">internal: {internal_total:,.0f} ton</div>
+            <div class="kpi-subtitle">Target: {target_period/1000:,.0f}k Ton</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
-            <div class="kpi-icon">📈</div>
-            <div class="kpi-label">Rata-rata Harian</div>
-            <div class="kpi-value">{avg_daily:,.0f}</div>
-            <div class="kpi-subtitle">ton/hari</div>
+            <div class="kpi-icon">⚡</div>
+            <div class="kpi-label">Produktivitas</div>
+            <div class="kpi-value">{avg_speed:,.1f}</div>
+            <div class="kpi-subtitle">Ton/Unit/Jam</div>
         </div>
         <div class="kpi-card" style="--card-accent: #d4a84b;">
             <div class="kpi-icon">🚛</div>
             <div class="kpi-label">Total Ritase</div>
             <div class="kpi-value">{total_rit:,.0f}</div>
-            <div class="kpi-subtitle">{avg_per_trip:.1f} ton/trip</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: {days_color};">
-            <div class="kpi-icon">📅</div>
-            <div class="kpi-label">Hari Tercapai</div>
-            <div class="kpi-value">{days_above_target}/{total_days}</div>
-            <div class="kpi-subtitle">{days_pct:.0f}% hari ≥ target</div>
+            <div class="kpi-subtitle">Trip</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # 4. PRIMARY CHARTS (Top Level)
+    # ----------------------------------------
     
-    # Period info
-    st.caption(f"📅 Periode: {start_date} - {end_date} ({total_days} hari) • 📋 {len(df_filtered):,} records • 🏗️ {total_exc} Excavator • 🚛 {total_dt} Dump Truck")
-    
-    # ===== MAIN CHART: PRODUCTION TREND =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">📈 Trend Produksi Harian</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    daily = df_filtered.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
-    
+    # ROW 1: Daily Trend (PROFESSIONAL THEME)
     with st.container(border=True):
-        # Create combined chart with secondary axis
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        st.markdown("##### 📅 **PERFORMA HARIAN** | Realisasi Harian vs Target")
+        st.markdown("---")
         
-        # Bar colors: red < 18k, orange 18k-25k, green >= 25k
-        colors = ['#10b981' if t >= DAILY_INTERNAL_TARGET else '#f59e0b' if t >= DAILY_PRODUCTION_TARGET else '#ef4444' 
-                  for t in daily['Tonnase']]
-        
-        # Production bars
-        fig.add_trace(
-            go.Bar(x=daily['Date'], y=daily['Tonnase'], name='Produksi', marker_color=colors,
-                   hovertemplate='<b>%{x|%d %b %Y}</b><br>Produksi: %{y:,.0f} ton<extra></extra>'),
-            secondary_y=False
-        )
-        
-        # Target line (Plan - 18k)
-        fig.add_trace(
-            go.Scatter(x=daily['Date'], y=[DAILY_PRODUCTION_TARGET]*len(daily), name=f'Target ({DAILY_PRODUCTION_TARGET:,})', 
-                       line=dict(color='#ef4444', width=2, dash='dash'), mode='lines',
-                       hovertemplate='Target: %{y:,} ton<extra></extra>'),
-            secondary_y=False
-        )
-        
-        # Internal target line (25k)
-        fig.add_trace(
-            go.Scatter(x=daily['Date'], y=[DAILY_INTERNAL_TARGET]*len(daily), name=f'Internal ({DAILY_INTERNAL_TARGET:,})', 
-                       line=dict(color='#f59e0b', width=2, dash='dot'), mode='lines',
-                       hovertemplate='Internal: %{y:,} ton<extra></extra>'),
-            secondary_y=False
-        )
-        
-        # Ritase line on secondary axis
-        fig.add_trace(
-            go.Scatter(x=daily['Date'], y=daily['Rit'], name='Ritase', 
-                       line=dict(color='#8b5cf6', width=2), mode='lines+markers', marker=dict(size=4),
-                       hovertemplate='Ritase: %{y:,.0f}<extra></extra>'),
-            secondary_y=True
-        )
-        
-        fig.update_layout(**get_chart_layout(height=380))
-        fig.update_yaxes(title_text="Tonase (ton)", secondary_y=False, gridcolor='rgba(255,255,255,0.1)')
-        fig.update_yaxes(title_text="Ritase", secondary_y=True, showgrid=False)
-        fig.update_xaxes(tickformat='%d %b', gridcolor='rgba(255,255,255,0.05)')
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== CUMULATIVE PRODUCTION CHART =====
-    
-    # ===== ANALYSIS SECTION =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">📊 Analisis Produksi</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["🏗️ Per Unit", "📍 Per Lokasi", "🔄 Per Shift"])
-    
-    with tab1:
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(16, 185, 129, 0.3);">
-                    <h4 style="color: #10b981; margin: 0; font-size: 0.9rem;">🏗️ Excavator Performance</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                exc_data = df_filtered.groupby('Excavator').agg({
-                    'Tonnase': 'sum', 
-                    'Rit': 'sum'
-                }).reset_index()
-                exc_data['Avg_per_Rit'] = exc_data['Tonnase'] / exc_data['Rit'].replace(0, 1)
-                exc_data = exc_data.sort_values('Tonnase', ascending=True)
-                
-                fig = px.bar(exc_data, x='Tonnase', y='Excavator', orientation='h',
-                            color='Tonnase', color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']],
-                            hover_data={'Rit': ':,.0f', 'Avg_per_Rit': ':.1f'})
-                fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                fig.update_traces(hovertemplate='<b>%{y}</b><br>Tonase: %{x:,.0f}<br>Ritase: %{customdata[0]:,.0f}<br>Avg/Rit: %{customdata[1]:.1f}<extra></extra>')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        with col2:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(212, 168, 75, 0.3);">
-                    <h4 style="color: #d4a84b; margin: 0; font-size: 0.9rem;">🚛 Top 10 Dump Truck</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                dt_data = df_filtered.groupby('Dump Truck').agg({
-                    'Tonnase': 'sum',
-                    'Rit': 'sum'
-                }).reset_index()
-                dt_data = dt_data.sort_values('Tonnase', ascending=True).tail(10)
-                
-                fig = px.bar(dt_data, x='Tonnase', y='Dump Truck', orientation='h',
-                            color='Tonnase', color_continuous_scale=[[0, '#1e3a5f'], [1, '#d4a84b']])
-                fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with tab2:
-        # Row 1: BLOK and Front charts
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(59, 130, 246, 0.3);">
-                    <h4 style="color: #3b82f6; margin: 0 0 0.5rem 0; font-size: 0.9rem;">📊 Produksi per BLOK</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                blok_data = df_filtered.groupby('BLOK')['Tonnase'].sum().reset_index()
-                blok_data = blok_data.sort_values('Tonnase', ascending=False).head(10)
-                
-                fig = px.bar(blok_data, x='BLOK', y='Tonnase', color='Tonnase',
-                            color_continuous_scale=[[0, '#1e3a5f'], [1, '#3b82f6']])
-                fig.update_layout(**get_chart_layout(height=280, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        with col2:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(139, 92, 246, 0.3);">
-                    <h4 style="color: #8b5cf6; margin: 0 0 0.5rem 0; font-size: 0.9rem;">📍 Produksi per Front</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                front_data = df_filtered.groupby('Front')['Tonnase'].sum().reset_index()
-                front_data = front_data.sort_values('Tonnase', ascending=False).head(10)
-                
-                fig = px.bar(front_data, x='Front', y='Tonnase', color='Tonnase',
-                            color_continuous_scale=[[0, '#1e3a5f'], [1, '#8b5cf6']])
-                fig.update_layout(**get_chart_layout(height=280, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        # Separator
-        st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;'>", unsafe_allow_html=True)
-        
-        # Row 2: Material composition
-        with st.container(border=True):
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(212, 168, 75, 0.3);">
-                <h4 style="color: #d4a84b; margin: 0; font-size: 0.9rem;">🪨 Komposisi Material</h4>
-            </div>
-            """, unsafe_allow_html=True)
+        if not df_prod.empty:
+            daily_agg = df_prod.groupby('Date')['Tonnase'].sum().reset_index().sort_values('Date')
             
-            col_m1, col_m2 = st.columns([1, 2])
+            # Color Logic: Red (Under) -> Blue (Target) -> Green (Internal)
+            colors = []
+            for val in daily_agg['Tonnase']:
+                if val >= DAILY_INTERNAL_TARGET:
+                    colors.append('#10b981') # Green (Internal Target)
+                elif val >= DAILY_PRODUCTION_TARGET:
+                    colors.append('#3b82f6') # Blue (Main Target)
+                else:
+                    colors.append('#ef4444') # Red (Under Target)
             
-            with col_m1:
-                mat_data = df_filtered.groupby('Commudity')['Tonnase'].sum().reset_index()
-                mat_data['Percentage'] = mat_data['Tonnase'] / mat_data['Tonnase'].sum() * 100
-                
-                fig = px.pie(mat_data, values='Tonnase', names='Commudity', hole=0.5,
-                            color_discrete_sequence=CHART_SEQUENCE)
-                fig.update_layout(**get_chart_layout(height=300, show_legend=False))
-                fig.update_traces(textposition='inside', textinfo='percent',
-                                 hovertemplate='<b>%{label}</b><br>%{value:,.0f} ton<br>%{percent}<extra></extra>')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            fig = go.Figure()
             
-            with col_m2:
-                # Material breakdown table with styling
-                mat_table = mat_data.copy()
-                mat_table = mat_table.sort_values('Tonnase', ascending=False)
-                mat_table['Tonnase_fmt'] = mat_table['Tonnase'].apply(lambda x: f"{x:,.0f}")
-                mat_table['Percentage_fmt'] = mat_table['Percentage'].apply(lambda x: f"{x:.1f}%")
-                
-                st.dataframe(
-                    mat_table[['Commudity', 'Tonnase_fmt', 'Percentage_fmt']].rename(columns={
-                        'Commudity': 'Material',
-                        'Tonnase_fmt': 'Tonase',
-                        'Percentage_fmt': 'Persentase'
-                    }),
-                    use_container_width=True,
-                    hide_index=True,
-                    height=240
-                )
-    
-    with tab3:
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(59, 130, 246, 0.3);">
-                    <h4 style="color: #3b82f6; margin: 0; font-size: 0.9rem;">📊 Produksi per Shift</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                shift_data = df_filtered.groupby('Shift')['Tonnase'].sum().reset_index()
-                shift_data['Percentage'] = shift_data['Tonnase'] / shift_data['Tonnase'].sum() * 100
-                
-                fig = px.bar(shift_data, x='Shift', y='Tonnase', color='Shift',
-                            text=shift_data['Percentage'].apply(lambda x: f'{x:.1f}%'),
-                            color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b'])
-                fig.update_layout(**get_chart_layout(height=280, show_legend=False))
-                fig.update_traces(textposition='outside')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        with col2:
-            with st.container(border=True):
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                            border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                            border: 1px solid rgba(16, 185, 129, 0.3);">
-                    <h4 style="color: #10b981; margin: 0; font-size: 0.9rem;">📈 Rata-rata Harian per Shift</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                shift_daily = df_filtered.groupby(['Date', 'Shift'])['Tonnase'].sum().reset_index()
-                shift_avg = shift_daily.groupby('Shift')['Tonnase'].mean().reset_index()
-                shift_avg.columns = ['Shift', 'Avg_Daily']
-                
-                fig = px.bar(shift_avg, x='Shift', y='Avg_Daily', color='Shift',
-                            text=shift_avg['Avg_Daily'].apply(lambda x: f'{x:,.0f}'),
-                            color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b'])
-                fig.update_layout(**get_chart_layout(height=280, show_legend=False))
-                fig.update_traces(textposition='outside')
-                fig.update_yaxes(title_text='Rata-rata Tonase/Hari')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        
-        # Separator
-        st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;'>", unsafe_allow_html=True)
-        
-        # Heatmap - full width for better visibility
-        with st.container(border=True):
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); 
-                        border-radius: 12px; padding: 1rem; margin-bottom: 1rem;
-                        border: 1px solid rgba(139, 92, 246, 0.3);">
-                <h4 style="color: #8b5cf6; margin: 0; font-size: 0.9rem;">🔥 Heatmap: Shift × Excavator</h4>
-            </div>
-            """, unsafe_allow_html=True)
+            # 1. Bar: Actual Production (Conditional Color)
+            fig.add_trace(go.Bar(
+                x=daily_agg['Date'], 
+                y=daily_agg['Tonnase'],
+                name='Realisasi',
+                marker_color=colors, # Conditional Colors
+                opacity=0.9,
+                text=daily_agg['Tonnase'],
+                texttemplate='%{text:,.0f}',
+                textposition='auto',
+                hovertemplate='<b>%{x|%d %b}</b>: %{y:,.0f} Ton<extra></extra>'
+            ))
             
-            pivot = df_filtered.pivot_table(values='Tonnase', index='Excavator', columns='Shift', 
-                                           aggfunc='sum', fill_value=0)
+            # 2. Line: Main Target (Red Solid)
+            fig.add_trace(go.Scatter(
+                x=daily_agg['Date'],
+                y=[DAILY_PRODUCTION_TARGET] * len(daily_agg),
+                mode='lines',
+                name=f'Target ({DAILY_PRODUCTION_TARGET:,.0f})',
+                line=dict(color='#ef4444', width=3)
+            ))
+
+            # 3. Line: Internal Target (Yellow Dashed)
+            fig.add_trace(go.Scatter(
+                x=daily_agg['Date'],
+                y=[DAILY_INTERNAL_TARGET] * len(daily_agg),
+                mode='lines',
+                name=f'Internal ({DAILY_INTERNAL_TARGET:,.0f})',
+                line=dict(color='#f59e0b', width=2, dash='dash')
+            ))
             
-            if not pivot.empty:
-                fig = px.imshow(pivot, aspect='auto', text_auto='.0f',
-                               color_continuous_scale=[[0, '#0a1628'], [0.3, '#1e3a5f'], [0.6, '#3b82f6'], [1, '#10b981']])
-                fig.update_layout(**get_chart_layout(height=350, show_legend=False))
-                fig.update_traces(textfont=dict(size=10, color='white'))
-                fig.update_coloraxes(showscale=True, colorbar=dict(title='Tonase', tickformat=','))
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== DATA TABLE =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">📋 Data Detail</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Summary row
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0a1628 100%); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-            <div><span style="color: #64748b;">Total Records:</span> <span style="color: #fff; font-weight: 600;">{len(df_filtered):,}</span></div>
-            <div><span style="color: #64748b;">Total Tonase:</span> <span style="color: #10b981; font-weight: 600;">{total_ton:,.0f} ton</span></div>
-            <div><span style="color: #64748b;">Total Ritase:</span> <span style="color: #d4a84b; font-weight: 600;">{total_rit:,.0f}</span></div>
-            <div><span style="color: #64748b;">Avg/Trip:</span> <span style="color: #8b5cf6; font-weight: 600;">{avg_per_trip:.1f} ton</span></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Export button
-    col1, col2 = st.columns([4, 1])
-    with col2:
-        import io
-        buffer = io.BytesIO()
-        # Export with original column names
-        cols_export = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
-        cols_export = [c for c in cols_export if c in df_filtered.columns]
-        
-        try:
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_filtered[cols_export].sort_index(ascending=False).to_excel(writer, index=False, sheet_name='Produksi')
-            
-            st.download_button(
-                label="📥 Export Excel",
-                data=buffer.getvalue(),
-                file_name=f"produksi_export_N{len(df_filtered)}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+            # Find Best Day
+            best_day = daily_agg.loc[daily_agg['Tonnase'].idxmax()]
+            fig.add_annotation(
+                x=best_day['Date'], y=best_day['Tonnase'],
+                text=f"🏆 Max: {best_day['Tonnase']:,.0f}",
+                showarrow=True, arrowhead=2, ax=0, ay=-40,
+                font=dict(color="#10b981", size=12)
             )
-        except Exception as e:
-            st.warning(f"⚠️ Export tidak tersedia saat ini (Disk Full/Error).")
-            # Log error nicely without breaking app
-            print(f"Export Error: {e}")
+            
+            # Apply default layout first
+            fig.update_layout(**get_chart_layout(height=450))
+
+            # Apply specific customizations
+            fig.update_layout(
+                title="Pencapaian Produksi Harian",
+                xaxis=dict(title="Tanggal", tickformat='%d %b'),
+                yaxis=dict(title="Tonase (Ton)", showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)'),
+                legend=dict(orientation="h", y=-0.3, x=0.5, xanchor="center", bgcolor='rgba(0,0,0,0)'),
+                hovermode="x unified",
+                margin=dict(l=20, r=20, t=50, b=80)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Legend Helper
+            st.markdown(f"""
+            <div style="display:flex; gap:15px; font-size:0.8rem; color:#cbd5e1; justify-content:center; margin-top:-10px;">
+                <span>🔴 Di Bawah Target (< {DAILY_PRODUCTION_TARGET/1000}k)</span>
+                <span>🔵 Mencapai Target (≥ {DAILY_PRODUCTION_TARGET/1000}k)</span>
+                <span>🟢 Target Internal (≥ {DAILY_INTERNAL_TARGET/1000}k)</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+    # ROW 2: Hourly Rhythm & Shift (Split)
+    c1, c2 = st.columns([2, 1])
     
-    # Table
-    cols_show = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
-    cols_show = [c for c in cols_show if c in df_filtered.columns]
+    with c1:
+        with st.container(border=True):
+             st.markdown("##### ⏱️ **IRAMA PER JAM (HOURLY RHYTHM)**")
+             st.markdown("---")
+
+             if not df_prod_valid_time.empty:
+                 hourly_sum = df_prod_valid_time.groupby('Hour')['Tonnase'].sum().reset_index()
+                 hourly_sum['Avg'] = hourly_sum['Tonnase'] / total_days
+                 
+                 # INDUSTRIAL BLUE/GOLD COMBO
+                 fig = px.bar(hourly_sum, x='Hour', y='Avg', 
+                              labels={'Hour': 'Jam', 'Avg': 'Ton/Jam'},
+                              text_auto='.0f',
+                              color='Avg',
+                              color_continuous_scale='cividis') # Professional Gradient
+                 
+                 fig.update_layout(xaxis=dict(tickmode='linear', dtick=1))
+                 fig.update_layout(**get_chart_layout(height=350))
+                 fig.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0), coloraxis_showscale=False)
+                 st.plotly_chart(fig, use_container_width=True)
+             else:
+                 st.warning("Data waktu tidak valid.")
     
-    st.dataframe(
-        df_filtered[cols_show].sort_index(ascending=False),
-        use_container_width=True,
-        height=450,
-        column_config={
-            "Date": st.column_config.DateColumn(format="DD/MM/YYYY"),
-            "Tonnase": st.column_config.NumberColumn(format="%.0f"),
-            "Rit": st.column_config.NumberColumn(format="%.0f"),
-        }
-    )
+    with c2:
+        with st.container(border=True):
+            st.markdown("##### 🌓 **SHIFT**")
+            st.markdown("---")
+            
+            if 'Shift' in df_prod.columns:
+                shift_prod = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
+                shift_prod['Shift'] = 'Shift ' + shift_prod['Shift'].astype(str).str.replace('Shift ', '')
+                
+                # Standard Shift Colors
+                SHIFT_COLORS = {'Shift 1': '#d4a84b', 'Shift 2': '#3b82f6', 'Shift 3': '#10b981'}
+                
+                fig_shift = px.pie(shift_prod, values='Tonnase', names='Shift', 
+                                 hole=0.6,
+                                 color='Shift',
+                                 color_discrete_map=SHIFT_COLORS)
+                fig_shift.update_traces(textposition='inside', textinfo='percent+label')
+                fig_shift.update_layout(**get_chart_layout(height=350))
+                fig_shift.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                
+                # Center Annotation
+                fig_shift.add_annotation(text=f"Total<br>{total_prod/1000:,.0f}k", x=0.5, y=0.5, font_size=20, showarrow=False)
+                
+                st.plotly_chart(fig_shift, use_container_width=True)
+            else:
+                 st.warning("Data Shift tidak tersedia.")
+            
+    # ROW 3: Unit Performance & Source Analysis
+    col_left, col_right = st.columns(2)
+    with col_left:
+        with st.container(border=True):
+            st.markdown("##### 🚜 **PERFORMA UNIT** | Top Excavator")
+            st.markdown("---")
+            
+            if not df_prod.empty:
+                unit_perf = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+                
+                # Solid Blue Bars
+                fig = px.bar(unit_perf, y='Excavator', x='Tonnase', orientation='h', 
+                             text_auto='.2s',
+                             color_discrete_sequence=['#3b82f6']) 
+                
+                fig.update_layout(**get_chart_layout(height=380))
+                fig.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
+                st.plotly_chart(fig, use_container_width=True)
+    
+    with col_right:
+        with st.container(border=True):
+            st.markdown("##### 📍 **SUMBER (FRONT)** | Distribusi Front")
+            st.markdown("---")
+            
+            if 'Front' in df_prod.columns and not df_prod.empty:
+                front_prod = df_prod.groupby('Front')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=False)
+                
+                if len(front_prod) > 10:
+                    front_prod = front_prod.head(10)
+                
+                # REVISED: Horizontal Bar Chart for clearer ranking (Professional Request)
+                fig_front = px.bar(front_prod, x='Tonnase', y='Front', orientation='h',
+                                   text_auto='.2s',
+                                   color_discrete_sequence=['#3b82f6']) # Professional Blue
+                
+                fig_front.update_layout(**get_chart_layout(height=380))
+                fig_front.update_layout(yaxis=dict(autorange="reversed", automargin=True), showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                st.plotly_chart(fig_front, use_container_width=True)
+    
+    # ROW 4: Disposal Analysis
+    with st.container(border=True):
+        st.markdown("##### 🚛 **TUJUAN (DISPOSAL)** | Distribusi Disposal")
+        st.markdown("---")
+        
+        if 'Dump Loc' in df_prod.columns and not df_prod.empty:
+            dump_prod = df_prod.groupby('Dump Loc')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+            
+            # Solid Green Bars
+            fig_dump = px.bar(dump_prod, x='Tonnase', y='Dump Loc', orientation='h',
+                              text_auto='.2s',
+                              color_discrete_sequence=['#10b981'])                          
+            fig_dump.update_layout(**get_chart_layout(height=380))
+            fig_dump.update_layout(yaxis=dict(automargin=True), showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
+            st.plotly_chart(fig_dump, use_container_width=True)
+
+    # 5. DETAIL DATA & DOWNLOAD
+    # ----------------------------------------
+    st.markdown("### 📋 Detail Data Produksi")
+    with st.expander("Lihat Tabel Lengkap", expanded=False):
+        df_display = df_prod.copy()
+        df_display = df_display.iloc[::-1]
+        
+        if 'Date' in df_display.columns:
+             df_display['Date'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+             
+        display_cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 
+                        'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
+        df_display = df_display[[c for c in display_cols if c in df_display.columns]]
+             
+        st.dataframe(df_display, use_container_width=True)
+        
+        csv = df_prod.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Unduh Data (CSV)",
+            data=csv,
+            file_name=f"produksi_detail_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            type="primary"
+        )

@@ -67,18 +67,100 @@ def render_sidebar():
         
         st.markdown("---")
         
+        # ============================================================
+        # GLOBAL FILTERS (NEW)
+        # ============================================================
+        st.markdown('<p class="nav-label">🔍 Global Filters</p>', unsafe_allow_html=True)
+        
+        # 1. Date Range
+        from datetime import date
+        today = date.today()
+        # Default start date: Jan 1, 2026 as per user request
+        default_start = date(2026, 1, 1)
+        
+        # Initialize session state for filters if not exists
+        if 'global_filters' not in st.session_state:
+            st.session_state.global_filters = {
+                'date_range': (default_start, today),
+                'shift': 'All Displatch'
+            }
+            
+        date_range = st.date_input(
+            "📅 Rentang Tanggal",
+            value=(default_start, today),
+            key="filter_date_range"
+        )
+        
+        
+        # Load data ONCE for all filters
+        from utils.data_loader import load_produksi
+        df_prod = load_produksi()
+
+        # 2. Shift Filter (Dynamic)
+        # Load unique shifts
+        shift_options = ["All Displatch"]
+        if not df_prod.empty and 'Shift' in df_prod.columns:
+            # Get unique shifts, convert to string, sort
+            unique_shifts = sorted(df_prod['Shift'].astype(str).unique().tolist())
+            shift_options.extend(unique_shifts)
+        else:
+            shift_options.extend(["Shift 1", "Shift 2"]) # Fallback
+            
+        shift_select = st.selectbox(
+            "🕒 Shift Operasional",
+            shift_options,
+            index=0,
+            key="filter_shift"
+        )
+        
+        # 3. Dynamic Filters (Front & Excavator)
+        # Data already loaded above
+        
+        # Front Filter
+        
+        # Front Filter
+        front_options = sorted(df_prod['Front'].dropna().unique().tolist()) if not df_prod.empty and 'Front' in df_prod.columns else []
+        front_select = st.multiselect(
+            "📍 Lokasi Kerja (Front)",
+            options=front_options,
+            default=[],
+            placeholder="Pilih Front (Opsional)",
+            key="filter_front"
+        )
+        
+        # Excavator Filter
+        exca_options = sorted(df_prod['Excavator'].dropna().unique().tolist()) if not df_prod.empty and 'Excavator' in df_prod.columns else []
+        exca_select = st.multiselect(
+            "🚜 Unit Excavator",
+            options=exca_options,
+            default=[],
+            placeholder="Pilih Unit (Opsional)",
+            key="filter_exca"
+        )
+        
+        # Store in session state
+        st.session_state.global_filters['date_range'] = date_range
+        st.session_state.global_filters['shift'] = shift_select
+        st.session_state.global_filters['front'] = front_select
+        st.session_state.global_filters['excavator'] = exca_select
+        
+        st.markdown("---")
+        
         # Navigation
         st.markdown('<p class="nav-label">📋 Navigation</p>', unsafe_allow_html=True)
         
         menus = [
-            ("🏠", "Dashboard"),
-            ("📊", "Produksi"),
-            ("🚨", "Gangguan"),
-            ("⛽", "Monitoring"),
+            ("🏠", "Ringkasan Eksekutif"),
+            ("⛏️", "Produksi"),
+            ("🚛", "Ritase"),
+            ("⚙️", "Stockpile & Proses"),
+            ("🚨", "Gangguan Unit"),
+            ("🚢", "Pengiriman & Logistik"),
             ("📋", "Daily Plan")
         ]
         
         for icon, menu in menus:
+            # Map old menu names if needed or handle routing in app.py
             btn_type = "primary" if st.session_state.current_menu == menu else "secondary"
             if st.button(f"{icon}  {menu}", key=f"nav_{menu}", use_container_width=True, type=btn_type):
                 st.session_state.current_menu = menu

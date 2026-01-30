@@ -2,225 +2,181 @@
 # DASHBOARD - Professional Mining Operations Overview
 # ============================================================
 # Industry-grade mining operations monitoring
-# Version 2.0 - Enhanced with professional KPIs and charts
+# Version 3.0 - Global Filters & Downloadable Tables
 
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import pandas as pd
 
 from config import MINING_COLORS, CHART_SEQUENCE, DAILY_PRODUCTION_TARGET, DAILY_INTERNAL_TARGET
-from utils import load_produksi, load_gangguan_all, get_gangguan_summary
+from utils.data_loader import (load_produksi, load_gangguan_all, load_ritase_by_front, 
+                               load_stockpile_hopper, apply_global_filters)
 from utils.helpers import get_chart_layout
 
 
 def show_dashboard():
-    """Professional Mining Operations Dashboard"""
+    """Professional Mining Operations Executive Summary"""
     
     # Page Header
+    # Page Header
     st.markdown("""
+    <style>
+    /* FORCE OVERRIDE FOR CONTAINERS */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        /* VISIBLE CONTRAST CARD STYLE */
+        background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+       pointer-events: auto; 
+    }
+    </style>
+    
     <div class="page-header">
         <div class="page-header-icon">📊</div>
         <div class="page-header-text">
-            <h1>Operations Dashboard</h1>
-            <p>Real-time mining production overview • """ + datetime.now().strftime("%d %b %Y, %H:%M") + """</p>
+            <h1>Ringkasan Eksekutif</h1>
+            <p>Mining Operations Overview • Global View</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Load Data
-    df_prod = load_produksi()
-    df_gangguan = load_gangguan_all()
-    gangguan_summary = get_gangguan_summary(df_gangguan)
+    # 1. LOAD & FILTER DATA
+    # ----------------------------------------
+    with st.spinner("Loading Executive Data..."):
+        # Load Raw Data
+        df_prod = load_produksi()
+        df_gangguan = load_gangguan_all()
+        df_ritase = load_ritase_by_front()
+        # df_stockpile = load_stockpile_hopper() # Load later if needed to save memory
+        
+        # Apply Global Filters
+        df_prod = apply_global_filters(df_prod, date_col='Date', shift_col='Shift')
+        df_gangguan = apply_global_filters(df_gangguan, date_col='Date', shift_col='Shift')
+        # Ritase loader might return grouped data, check structure carefully.
+        # Ideally we filter raw ritase before grouping, but here we assume loader handles date/shift internally or we filter result.
+        # For now, let's filter the dataframes that have Date/Shift columns.
+        
     
-    # ===== CALCULATE METRICS =====
+    # 2. CALCULATE KPIS
+    # ----------------------------------------
+    kpi_prod = 0
+    kpi_ritase = 0
+    kpi_downtime = 0
+    kpi_active_units = 0
+    
+    # Production & Ritase
     if not df_prod.empty:
+        kpi_prod = df_prod['Tonnase'].sum()
+        # Use 'Rit' column from production data for consistency
+        if 'Rit' in df_prod.columns:
+            kpi_ritase = df_prod['Rit'].sum()
+            
         total_days = df_prod['Date'].nunique()
-        total_rit = df_prod['Rit'].sum()
-        total_ton = df_prod['Tonnase'].sum()
-        total_exc = df_prod['Excavator'].nunique()
-        total_dt = df_prod['Dump Truck'].nunique()
+        target_prod = DAILY_PRODUCTION_TARGET * total_days if total_days > 0 else DAILY_PRODUCTION_TARGET
+        ach_prod = (kpi_prod / target_prod * 100) if target_prod > 0 else 0
+        active_exc = df_prod['Excavator'].nunique()
+        active_dt = df_prod['Dump Truck'].nunique()
+        kpi_active_units = active_exc + active_dt
+    else:
+        ach_prod = 0
+            
+    # Gangguan
+    if not df_gangguan.empty:
+        kpi_downtime = df_gangguan['Durasi'].sum()
         
-        # Calculate daily for target analysis
-        daily_tonnage = df_prod.groupby('Date')['Tonnase'].sum()
-        days_above_target = (daily_tonnage >= DAILY_PRODUCTION_TARGET).sum()
-        
-        target_total = DAILY_PRODUCTION_TARGET * total_days
-        internal_total = DAILY_INTERNAL_TARGET * total_days
-        achievement_pct = (total_ton / target_total * 100) if target_total > 0 else 0
-        achievement_internal_pct = (total_ton / internal_total * 100) if internal_total > 0 else 0
-        avg_daily = total_ton / total_days if total_days > 0 else 0
-    else:
-        total_days = total_rit = total_ton = total_exc = total_dt = 0
-        target_total = achievement_pct = avg_daily = 0
-        achievement_internal_pct = days_above_target = 0
     
-    total_gangguan = gangguan_summary['total_incidents']
-    total_downtime = gangguan_summary['total_downtime']
-    
-    # Achievement color - vs Target
-    if achievement_pct >= 100:
-        ach_color, ach_icon = "#10b981", "✓"
-    elif achievement_pct >= 85:
-        ach_color, ach_icon = "#f59e0b", "◆"
-    else:
-        ach_color, ach_icon = "#ef4444", "!"
-    
-    # Achievement color - vs Internal
-    if achievement_internal_pct >= 100:
-        int_color, int_icon = "#10b981", "✓"
-    elif achievement_internal_pct >= 85:
-        int_color, int_icon = "#f59e0b", "◆"
-    else:
-        int_color, int_icon = "#ef4444", "!"
-    
-    # ===== KPI CARDS =====
+    # 3. DISPLAY KPI CARDS
+    # ----------------------------------------
     st.markdown(f"""
-    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; margin: 1rem 0;">
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
-            <div class="kpi-icon">📊</div>
+            <div class="kpi-icon">⛏️</div>
             <div class="kpi-label">Total Produksi</div>
-            <div class="kpi-value">{total_ton:,.0f}</div>
-            <div class="kpi-subtitle">ton ({total_days} hari)</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: {ach_color};">
-            <div class="kpi-icon">{ach_icon}</div>
-            <div class="kpi-label">vs Target</div>
-            <div class="kpi-value">{achievement_pct:.1f}%</div>
-            <div class="kpi-subtitle">{DAILY_PRODUCTION_TARGET:,}/hari</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: {int_color};">
-            <div class="kpi-icon">{int_icon}</div>
-            <div class="kpi-label">vs Internal</div>
-            <div class="kpi-value">{achievement_internal_pct:.1f}%</div>
-            <div class="kpi-subtitle">{DAILY_INTERNAL_TARGET:,}/hari</div>
+            <div class="kpi-value">{kpi_prod:,.0f} <span style="font-size:1rem;color:#64748b">ton</span></div>
+            <div class="kpi-subtitle">Pencapaian: {ach_prod:.1f}% vs Rencana</div>
         </div>
         <div class="kpi-card" style="--card-accent: #d4a84b;">
             <div class="kpi-icon">🚛</div>
             <div class="kpi-label">Total Ritase</div>
-            <div class="kpi-value">{total_rit:,.0f}</div>
-            <div class="kpi-subtitle">trips</div>
+            <div class="kpi-value">{kpi_ritase:,.0f} <span style="font-size:1rem;color:#64748b">rit</span></div>
+            <div class="kpi-subtitle">Performa Hauling</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #ef4444;">
+            <div class="kpi-icon">🛑</div>
+            <div class="kpi-label">Total Downtime</div>
+            <div class="kpi-value">{kpi_downtime:,.1f} <span style="font-size:1rem;color:#64748b">jam</span></div>
+            <div class="kpi-subtitle">Kehilangan Waktu Alat</div>
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
             <div class="kpi-icon">🏗️</div>
             <div class="kpi-label">Unit Aktif</div>
-            <div class="kpi-value">{total_exc + total_dt}</div>
-            <div class="kpi-subtitle">{total_exc} EXC • {total_dt} DT</div>
-        </div>
-        <div class="kpi-card" style="--card-accent: #ef4444;">
-            <div class="kpi-icon">🚨</div>
-            <div class="kpi-label">Gangguan</div>
-            <div class="kpi-value">{total_gangguan:,}</div>
-            <div class="kpi-subtitle">{total_downtime:,.0f} jam downtime</div>
+            <div class="kpi-value">{kpi_active_units} <span style="font-size:1rem;color:#64748b">unit</span></div>
+            <div class="kpi-subtitle">Utilisasi Armada</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # ===== PRODUCTION TREND =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">📈 Trend Produksi</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if not df_prod.empty:
-        with st.container(border=True):
-            daily = df_prod.groupby('Date').agg({'Tonnase': 'sum', 'Rit': 'sum'}).reset_index()
-            
-            # Bar colors: red < 18k, orange 18k-25k, green >= 25k
-            colors = ['#10b981' if t >= DAILY_INTERNAL_TARGET else '#f59e0b' if t >= DAILY_PRODUCTION_TARGET else '#ef4444' 
-                      for t in daily['Tonnase']]
-            
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=daily['Date'], y=daily['Tonnase'], marker_color=colors,
-                                hovertemplate='<b>%{x|%d %b}</b><br>%{y:,.0f} ton<extra></extra>'))
-            fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_PRODUCTION_TARGET]*len(daily),
-                                    line=dict(color='#ef4444', width=2, dash='dash'), name='Target'))
-            fig.add_trace(go.Scatter(x=daily['Date'], y=[DAILY_INTERNAL_TARGET]*len(daily),
-                                    line=dict(color='#f59e0b', width=2, dash='dot'), name='Internal'))
-            
-            fig.update_layout(**get_chart_layout(height=300))
-            fig.update_xaxes(tickformat='%d %b')
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== DISTRIBUTION ANALYSIS =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">📊 Distribusi</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
+    # 4. CHARTS SECTION
+    # ----------------------------------------
+    col1, col2 = st.columns([2, 1])
     
     with col1:
         with st.container(border=True):
-            st.markdown("**Per Excavator**")
+            st.markdown("#### 📈 Tren Produksi Harian")
             if not df_prod.empty:
-                exc = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index()
-                exc = exc.sort_values('Tonnase', ascending=True).tail(6)
-                fig = px.bar(exc, x='Tonnase', y='Excavator', orientation='h',
-                            color='Tonnase', color_continuous_scale=[[0, '#1e3a5f'], [1, '#10b981']])
-                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with col2:
-        with st.container(border=True):
-            st.markdown("**Per Material**")
-            if not df_prod.empty:
-                mat = df_prod.groupby('Commudity')['Tonnase'].sum().reset_index()
-                fig = px.pie(mat, values='Tonnase', names='Commudity', hole=0.5,
-                            color_discrete_sequence=CHART_SEQUENCE)
-                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-                fig.update_traces(textposition='inside', textinfo='percent')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with col3:
-        with st.container(border=True):
-            st.markdown("**Per Shift**")
-            if not df_prod.empty:
-                shift = df_prod.groupby('Shift')['Tonnase'].sum().reset_index()
-                fig = px.bar(shift, x='Shift', y='Tonnase', color='Shift',
-                            color_discrete_sequence=['#3b82f6', '#10b981', '#d4a84b'])
-                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    # ===== BOTTOM SECTION =====
-    st.markdown("""
-    <div class="section-divider">
-        <div class="section-divider-line"></div>
-        <span class="section-divider-text">🔍 Detail</span>
-        <div class="section-divider-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.container(border=True):
-            st.markdown("**Top 10 BLOK**")
-            if not df_prod.empty:
-                blok = df_prod.groupby('BLOK')['Tonnase'].sum().reset_index()
-                blok = blok.sort_values('Tonnase', ascending=False).head(10)
-                fig = px.bar(blok, x='BLOK', y='Tonnase', color='Tonnase',
-                            color_continuous_scale=[[0, '#1e3a5f'], [1, '#3b82f6']])
-                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-                fig.update_coloraxes(showscale=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    with col2:
-        with st.container(border=True):
-            st.markdown("**Top Gangguan**")
-            if not df_gangguan.empty:
-                dg = df_gangguan.groupby('Gangguan').size().reset_index(name='Frekuensi')
-                dg = dg.sort_values('Frekuensi', ascending=True).tail(5)
-                fig = px.bar(dg, x='Frekuensi', y='Gangguan', orientation='h',
-                            color_discrete_sequence=[MINING_COLORS['red']])
-                fig.update_layout(**get_chart_layout(height=230, show_legend=False))
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                daily = df_prod.groupby('Date')['Tonnase'].sum().reset_index()
+                fig = px.bar(daily, x='Date', y='Tonnase', 
+                             color='Tonnase',
+                             color_continuous_scale=[[0, '#ef4444'], [0.5, '#f59e0b'], [1, '#10b981']])
+                
+                # Add Target Line
+                fig.add_hline(y=DAILY_PRODUCTION_TARGET, line_dash="dash", line_color="red", annotation_text="Target")
+                
+                fig.update_layout(**get_chart_layout(height=350))
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("📊 No gangguan data available")
+                st.info("Data produksi tidak tersedia")
+                
+    with col2:
+        with st.container(border=True):
+            st.markdown("#### 🥧 Komposisi Breakdown")
+            if not df_gangguan.empty:
+                pie_data = df_gangguan.groupby('Gangguan').size().reset_index(name='Count')
+                fig = px.pie(pie_data, values='Count', names='Gangguan', hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Prism)
+                fig.update_layout(**get_chart_layout(height=350, show_legend=False))
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Data breakdown tidak tersedia")
+
+    # 5. DATA TABLE (DOWNLOAD)
+    # ----------------------------------------
+    st.markdown("### 📋 Data Detail Ringkasan")
+    
+    with st.expander("Lihat Tabel Data", expanded=True):
+        if not df_prod.empty:
+            st.dataframe(df_prod.head(100), use_container_width=True)
+            
+            # CSV Download
+            csv = df_prod.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Unduh Data Produksi (CSV)",
+                data=csv,
+                file_name=f"produksi_export_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("Data kosong untuk rentang tanggal yang dipilih.")
