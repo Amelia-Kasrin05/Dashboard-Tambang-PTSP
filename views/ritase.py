@@ -315,8 +315,9 @@ def show_ritase():
             display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
             
         # Select relevant columns for Ritase view
-        # Prioritize BLOK but fallback to Front if BLOK missing
-        cols = ['Date', 'Time', 'Shift', 'Excavator', 'Dump Truck', 'Front', 'BLOK', 'Rit', 'Tonnase']
+        # Select relevant columns for Ritase view (MATCHING PRODUKSI)
+        cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 
+                'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         
         # Filter existing columns
         show_cols = [c for c in cols if c in display_df.columns]
@@ -324,14 +325,31 @@ def show_ritase():
         # LOGIC MATCHING PRODUKSI: Reverse Order (Last Excel Row -> First)
         # Instead of sorting by Date/Time, we simply reverse the dataframe
         # assuming Excel is chronological top-to-bottom.
-        display_df = display_df.iloc[::-1]
+        display_reversed = display_df.iloc[::-1]
         
-        st.dataframe(display_df[show_cols], use_container_width=True)
+        st.dataframe(display_reversed[show_cols], use_container_width=True)
         
-        csv = display_df[show_cols].to_csv(index=False).encode('utf-8')
+        # Excel Download (Sort Ascending = Oldest Data First)
+        # 1. Sort by Date/Time (or rely on original df_ritase order if it was sorted)
+        # Since display_df came from df_ritase which might be sorted...
+        # Let's be explicit like in Produksi
+        
+        # We need the original unreversed data or just reverse the reversed one
+        df_download = display_reversed[show_cols].iloc[::-1]
+        
+        # Better: Sort explicitly if possible
+        if 'Date' in df_download.columns:
+             # It's already string formatted in line 315, so sorting might be string-based
+             # But YYYY-MM-DD sorts correctly as string.
+             df_download = df_download.sort_values(by=['Date'], ascending=True)
+
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(df_download)
+        
         st.download_button(
-            label="📥 Download Data Ritase",
-            data=csv,
-            file_name=f"ritase_log_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
+            label="📥 Unduh Data Ritase (Excel)",
+            data=excel_data,
+            file_name=f"PTSP_Aktivitas_Ritase_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
         )

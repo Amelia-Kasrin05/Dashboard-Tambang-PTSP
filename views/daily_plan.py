@@ -708,12 +708,27 @@ def show_daily_plan():
     # Filter row - MORE FILTERS
     filter_cols = st.columns([2, 2, 2, 2, 1])
     
+    # Retrieve Global Filters (if any)
+    global_filters = st.session_state.get('global_filters', {})
+    global_date_range = global_filters.get('date_range')
+    global_shift = global_filters.get('shift')
+    
     with filter_cols[0]:
         st.markdown("**📅 Tanggal**")
+        # Default to Global Filter End Date if available and in list, else latest available
+        default_date = available_dates[0] if available_dates else datetime.now().date()
+        
+        if global_date_range and isinstance(global_date_range, tuple) and len(global_date_range) > 1:
+            # User usually wants to see the specific date they selected. 
+            # Since Daily Plan is single-day, we pick the END date of the range (latest).
+            target_date = global_date_range[1]
+            if target_date in available_dates:
+                default_date = target_date
+                
         if len(available_dates) > 0:
             selected_date = st.date_input(
                 "Tanggal",
-                value=available_dates[0],
+                value=default_date,
                 key='dp_date',
                 label_visibility="collapsed"
             )
@@ -723,10 +738,19 @@ def show_daily_plan():
     with filter_cols[1]:
         st.markdown("**⏰ Shift**")
         shift_options = ['Semua'] + available_shifts
+        
+        # Sync with Global Shift
+        default_shifts = ['Semua']
+        if global_shift and global_shift != "All Displatch":
+            # Normalize Global Shift "Shift 1" -> "1"
+            g_shift_str = str(global_shift).replace("Shift ", "").strip()
+            if g_shift_str in available_shifts:
+                default_shifts = [g_shift_str]
+        
         selected_shifts = st.multiselect(
             "Shift",
             options=shift_options,
-            default=['Semua'],
+            default=default_shifts,
             key='dp_shift',
             label_visibility="collapsed"
         )
@@ -784,10 +808,21 @@ def show_daily_plan():
     with filter_cols2[1]:
         st.markdown("**📍 Grid**")
         grid_options = ['Semua'] + available_grid[:20]  # Limit to first 20
+        
+        # Sync with Global Front (which is often Grid)
+        global_front = global_filters.get('front')
+        default_grids = ['Semua']
+        
+        if global_front and len(global_front) > 0:
+            # Filter valid grids from global selection
+            valid_global_fronts = [g for g in global_front if str(g) in available_grid]
+            if valid_global_fronts:
+                default_grids = valid_global_fronts
+        
         selected_grids = st.multiselect(
             "Grid",
             options=grid_options,
-            default=['Semua'],
+            default=default_grids,
             key='dp_grid',
             label_visibility="collapsed"
         )
@@ -986,6 +1021,18 @@ def show_daily_plan():
     if not df_filtered.empty:
         display_df = create_data_table(df_filtered)
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+        
+        # Excel Download
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(display_df)
+        
+        st.download_button(
+            label="📥 Unduh Data Rencana (Excel)",
+            data=excel_data,
+            file_name=f"PTSP_Rencana_Harian_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
     else:
         st.info("Tidak ada data operasi untuk filter yang dipilih.")
     

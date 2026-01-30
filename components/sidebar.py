@@ -54,24 +54,33 @@ def render_sidebar():
             else:
                 status_class = "status-err"
             status_html += f'<div class="status-item"><span class="status-name">{name}</span><span class="status-value {status_class}">{stat}</span></div>'
-        status_html += '</div>'
-        st.markdown(status_html, unsafe_allow_html=True)
-        
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔄 Refresh", use_container_width=True):
                 st.cache_data.clear()
+                st.cache_resource.clear()
+                st.success("Cache Cleared!")
+                import time
+                time.sleep(1)
                 st.rerun()
         with col2:
-            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Cache: {CACHE_TTL}s</p>', unsafe_allow_html=True)
+            try:
+                from datetime import datetime
+                current_time = datetime.now().strftime("%H:%M")
+            except:
+                current_time = "--:--"
+            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Updated: {current_time}</p>', unsafe_allow_html=True)
         
         st.markdown("---")
         
         # ============================================================
         # GLOBAL FILTERS (NEW)
         # ============================================================
-        st.markdown('<p class="nav-label">🔍 Global Filters</p>', unsafe_allow_html=True)
-        
+        # ============================================================
+        # GLOBAL FILTERS (NEW)
+        # ============================================================
+        # st.markdown('<p class="nav-label">🔍 Global Filters</p>', unsafe_allow_html=True) # Replaced by Expander
+
         # 1. Date Range
         from datetime import date
         today = date.today()
@@ -82,67 +91,102 @@ def render_sidebar():
         if 'global_filters' not in st.session_state:
             st.session_state.global_filters = {
                 'date_range': (default_start, today),
-                'shift': 'All Displatch'
+                'shift': 'All Displatch',
+                'front': [],
+                'excavator': [],
+                'material': []
             }
-            
-        date_range = st.date_input(
-            "📅 Rentang Tanggal",
-            value=(default_start, today),
-            key="filter_date_range"
-        )
-        
-        
-        # Load data ONCE for all filters
-        from utils.data_loader import load_produksi
-        df_prod = load_produksi()
 
-        # 2. Shift Filter (Dynamic)
-        # Load unique shifts
-        shift_options = ["All Displatch"]
-        if not df_prod.empty and 'Shift' in df_prod.columns:
-            # Get unique shifts, convert to string, sort
-            unique_shifts = sorted(df_prod['Shift'].astype(str).unique().tolist())
-            shift_options.extend(unique_shifts)
-        else:
-            shift_options.extend(["Shift 1", "Shift 2"]) # Fallback
+        with st.expander("🔍 Global Filters", expanded=True):
+            # Reset Button
+            if st.button("♻️ Reset Filter", use_container_width=True, help="Kembalikan filter ke default"):
+                 st.session_state.global_filters = {
+                    'date_range': (default_start, today),
+                    'shift': 'All Displatch',
+                    'front': [],
+                    'excavator': [],
+                    'material': []
+                }
+                 st.rerun()
+
+            date_range = st.date_input(
+                "📅 Rentang Tanggal",
+                value=st.session_state.global_filters.get('date_range', (default_start, today)),
+                key="filter_date_range"
+            )
             
-        shift_select = st.selectbox(
-            "🕒 Shift Operasional",
-            shift_options,
-            index=0,
-            key="filter_shift"
-        )
-        
-        # 3. Dynamic Filters (Front & Excavator)
-        # Data already loaded above
-        
-        # Front Filter
-        
-        # Front Filter
-        front_options = sorted(df_prod['Front'].dropna().unique().tolist()) if not df_prod.empty and 'Front' in df_prod.columns else []
-        front_select = st.multiselect(
-            "📍 Lokasi Kerja (Front)",
-            options=front_options,
-            default=[],
-            placeholder="Pilih Front (Opsional)",
-            key="filter_front"
-        )
-        
-        # Excavator Filter
-        exca_options = sorted(df_prod['Excavator'].dropna().unique().tolist()) if not df_prod.empty and 'Excavator' in df_prod.columns else []
-        exca_select = st.multiselect(
-            "🚜 Unit Excavator",
-            options=exca_options,
-            default=[],
-            placeholder="Pilih Unit (Opsional)",
-            key="filter_exca"
-        )
-        
-        # Store in session state
-        st.session_state.global_filters['date_range'] = date_range
-        st.session_state.global_filters['shift'] = shift_select
-        st.session_state.global_filters['front'] = front_select
-        st.session_state.global_filters['excavator'] = exca_select
+            
+            # Load data ONCE for all filters
+            from utils.data_loader import load_produksi
+            df_prod = load_produksi()
+    
+            # 2. Shift Filter (Dynamic)
+            # Load unique shifts
+            shift_options = ["All Displatch"]
+            if not df_prod.empty and 'Shift' in df_prod.columns:
+                # Get unique shifts, convert to string, sort
+                unique_shifts = sorted(df_prod['Shift'].astype(str).unique().tolist())
+                shift_options.extend(unique_shifts)
+            else:
+                shift_options.extend(["Shift 1", "Shift 2"]) # Fallback
+                
+            # Get current shift value safely
+            current_shift = st.session_state.global_filters.get('shift', 'All Displatch')
+            if current_shift not in shift_options:
+                current_shift = 'All Displatch'
+                
+            shift_select = st.selectbox(
+                "🕒 Shift Operasional",
+                shift_options,
+                index=shift_options.index(current_shift),
+                key="filter_shift"
+            )
+            
+            # 3. Dynamic Filters (Front & Excavator)
+            # Data already loaded above
+            
+            # Front Filter
+            front_options = sorted(df_prod['Front'].dropna().unique().tolist()) if not df_prod.empty and 'Front' in df_prod.columns else []
+            front_select = st.multiselect(
+                "📍 Lokasi Kerja (Front)",
+                options=front_options,
+                default=st.session_state.global_filters.get('front', []),
+                placeholder="Pilih Front (Opsional)",
+                key="filter_front"
+            )
+            
+            # Excavator Filter
+            exca_options = sorted(df_prod['Excavator'].dropna().unique().tolist()) if not df_prod.empty and 'Excavator' in df_prod.columns else []
+            exca_select = st.multiselect(
+                "🚜 Unit Excavator",
+                options=exca_options,
+                default=st.session_state.global_filters.get('excavator', []),
+                placeholder="Pilih Unit (Opsional)",
+                key="filter_exca"
+            )
+            
+            # Material Filter (New Professional Requirement)
+            # Check for Commudity / Commodity column
+            mat_col = 'Commudity' if not df_prod.empty and 'Commudity' in df_prod.columns else ('Commodity' if not df_prod.empty and 'Commodity' in df_prod.columns else None)
+            
+            if mat_col:
+                mat_options = sorted(df_prod[mat_col].dropna().unique().tolist())
+                mat_select = st.multiselect(
+                    "🪨 Jenis Material",
+                    options=mat_options,
+                    default=st.session_state.global_filters.get('material', []),
+                    placeholder="Pilih Material (Opsional)",
+                    key="filter_mat"
+                )
+            else:
+                mat_select = []
+            
+            # Store in session state
+            st.session_state.global_filters['date_range'] = date_range
+            st.session_state.global_filters['shift'] = shift_select
+            st.session_state.global_filters['front'] = front_select
+            st.session_state.global_filters['excavator'] = exca_select
+            st.session_state.global_filters['material'] = mat_select
         
         st.markdown("---")
         

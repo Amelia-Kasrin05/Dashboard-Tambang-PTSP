@@ -70,3 +70,18 @@ def get_chart_layout(height=350, show_legend=True):
             font_family='Inter'
         )
     )
+
+
+# ============================================================
+# EXCEL HELPER
+# ============================================================
+
+def convert_df_to_excel(df):
+    """Convert dataframe to excel bytes"""
+    import io
+    import pandas as pd
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    return output.getvalue()

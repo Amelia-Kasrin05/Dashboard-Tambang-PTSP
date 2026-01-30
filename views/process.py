@@ -213,3 +213,18 @@ def show_process():
         cols_to_show = [c for c in cols_to_show if c in df_display.columns]
         
         st.dataframe(df_display[cols_to_show], use_container_width=True, hide_index=True)
+        
+        # Excel Download (Sort Ascending = Oldest Data First)
+        # Note: df_display is Newest First. We reverse it for download.
+        df_download = df_display[cols_to_show].iloc[::-1]
+        
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(df_download)
+        
+        st.download_button(
+            label="📥 Unduh Data Stockpile (Excel)",
+            data=excel_data,
+            file_name=f"PTSP_Stockpile_Process_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )

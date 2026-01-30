@@ -343,11 +343,25 @@ def show_produksi():
              
         st.dataframe(df_display, use_container_width=True)
         
-        csv = df_prod.to_csv(index=False).encode('utf-8')
+        # Excel Download (Sort Ascending = Oldest Data First)
+        # MATCHING TABLE COLUMNS EXACTLY
+        # 1. Sort raw data first
+        df_sorted = df_prod.sort_values(by=['Date', 'TimeStr'], ascending=True) if 'TimeStr' in df_prod.columns else df_prod.sort_values(by='Date', ascending=True)
+        
+        # 2. Format Date to match table string format
+        if 'Date' in df_sorted.columns:
+             df_sorted['Date'] = df_sorted['Date'].dt.strftime('%Y-%m-%d')
+             
+        # 3. Select ONLY the columns shown in table
+        df_download = df_sorted[[c for c in display_cols if c in df_sorted.columns]]
+        
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(df_download)
+        
         st.download_button(
-            label="📥 Unduh Data (CSV)",
-            data=csv,
-            file_name=f"produksi_detail_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
+            label="📥 Unduh Data (Excel)",
+            data=excel_data,
+            file_name=f"PTSP_Kinerja_Produksi_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )

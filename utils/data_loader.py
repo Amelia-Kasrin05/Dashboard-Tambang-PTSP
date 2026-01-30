@@ -79,6 +79,17 @@ def apply_global_filters(df, date_col='Date', shift_col='Shift'):
     selected_exca = filters.get('excavator')
     if selected_exca and 'Excavator' in df.columns:
         df = df[df['Excavator'].isin(selected_exca)]
+
+    # 5. Filter Material (Commodity)
+    selected_material = filters.get('material')
+    if selected_material:
+        # Check for both spellings (Commudity vs Commodity)
+        if 'Commudity' in df.columns:
+            df = df[df['Commudity'].isin(selected_material)]
+        elif 'Commodity' in df.columns:
+            df = df[df['Commodity'].isin(selected_material)]
+        elif 'Material' in df.columns:
+             df = df[df['Material'].isin(selected_material)]
              
     return df
 

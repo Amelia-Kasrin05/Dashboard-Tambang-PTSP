@@ -413,13 +413,20 @@ def show_dashboard():
             # Display
             st.dataframe(recap_df, use_container_width=True, hide_index=True)
             
-            # CSV Download
-            csv = recap_df.to_csv(index=False).encode('utf-8')
+            # Prepare Excel Download (OLDEST to NEWEST)
+            # Note: df_display is currently reversed (Newest First) for display
+            # So we can just reverse it back or sort df_prod
+            df_download = df_prod.sort_values(by=['Date', 'TimeStr'], ascending=True) if 'TimeStr' in df_prod.columns else df_prod.sort_values(by='Date', ascending=True)
+             
+            from utils.helpers import convert_df_to_excel
+            excel_data = convert_df_to_excel(df_download)
+            
             st.download_button(
-                label="📥 Unduh Laporan Harian (CSV)",
-                data=csv,
-                file_name=f"daily_recap_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
+                label="📥 Unduh Data (Excel)",
+                data=excel_data,
+                file_name=f"PTSP_Ringkasan_Eksekutif_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
             )
         else:
             st.warning("Tidak ada data untuk ditampilkan pada rentang tanggal ini.")

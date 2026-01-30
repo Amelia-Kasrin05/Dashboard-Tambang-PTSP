@@ -197,14 +197,9 @@ def show_gangguan():
                     df_valid = df.dropna(subset=['Start', 'End', 'Alat'])
                     
                     if not df_valid.empty:
-                        # OPTIMIZATION: User Control for "Top N" Units
+                        # OPTIMIZATION: Fixed Top N Units (Default 15)
                         # This balances "Clutter" vs "Detail" based on user preference
-                        top_n_units = st.sidebar.slider("Jumlah Unit di Timeline", 
-                                                        min_value=5, 
-                                                        max_value=50, 
-                                                        value=15, 
-                                                        step=5,
-                                                        help="Atur berapa banyak unit dengan downtime tertinggi yang ingin ditampilkan.")
+                        top_n_units = 15
 
                         # Filter Top N Units by Downtime for Readability
                         top_units_by_downtime = df_valid.groupby('Alat')['Durasi'].sum().sort_values(ascending=False).head(top_n_units).index
@@ -238,7 +233,6 @@ def show_gangguan():
                             *   **Sumbu Y (Kiri)**: Daftar Top {top_n_units} Unit yang paling lama rusak.
                             *   **Balok Merah**: Menandakan durasi kerusakan (Downtime). 
                             *   **Detail**: Arahkan kursor mouse ke balok merah untuk melihat **Jenis Masalah**.
-                            *   **Tips**: Gunakan slider di sebelah kiri untuk menambah/mengurangi jumlah unit.
                             """)
                         
                         if len(df_valid['Alat'].unique()) > top_n_units:
@@ -370,10 +364,38 @@ def show_gangguan():
 
         st.dataframe(df_display, use_container_width=True)
         
-        csv = df_gangguan.to_csv(index=False).encode('utf-8')
+
+        
+        # Excel Download (Sort Ascending = Oldest Data First)
+        # 1. Sort by DATE THEN Start Time
+        # The column in df_gangguan is 'Tanggal' (confirmed by file inspection)
+        sort_cols = []
+        if 'Tanggal' in df_gangguan.columns: sort_cols.append('Tanggal')
+        if 'Start' in df_gangguan.columns: sort_cols.append('Start')
+        
+        df_download = df_gangguan.sort_values(by=sort_cols, ascending=True) if sort_cols else df_gangguan
+        
+        # 2. Format Date to String (YYYY-MM-DD) to remove 00:00:00 timestamp
+        # 2. Format Date to String (YYYY-MM-DD) to remove 00:00:00 timestamp
+        if 'Tanggal' in df_download.columns:
+            # First ensure it's datetime just in case (though it should be from global filters)
+            try:
+                df_download['Tanggal'] = pd.to_datetime(df_download['Tanggal']).dt.strftime('%Y-%m-%d')
+            except:
+                pass # If it fails (already string or strange format), leave it
+                
+        # 3. Drop unwanted columns (Extra, Bulan_Name)
+        # Explicit drop is safer than index truncation
+        unwanted_cols = ['Extra', 'Bulan_Name', 'Month', 'Month_Name']
+        df_download = df_download.drop(columns=unwanted_cols, errors='ignore')
+        
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(df_download)
+        
         st.download_button(
-            label="📥 Unduh Data (CSV)",
-            data=csv,
-            file_name=f"gangguan_log_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
+            label="📥 Unduh Data (Excel)",
+            data=excel_data,
+            file_name=f"PTSP_Analisa_Kendala_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
         )

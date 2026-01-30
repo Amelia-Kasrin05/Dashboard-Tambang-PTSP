@@ -197,10 +197,25 @@ def show_shipping():
                 "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD")
             }
         )
-        csv = df.to_csv(index=False).encode('utf-8')
+        
+        # Excel Download (Sort Ascending = Oldest First)
+        df_download = df.sort_values(by='Date', ascending=True)
+        
+        # Format Date to String (Remove 00:00:00)
+        if 'Date' in df_download.columns:
+             try:
+                df_download['Date'] = pd.to_datetime(df_download['Date']).dt.strftime('%Y-%m-%d')
+             except:
+                pass
+        
+        from utils.helpers import convert_df_to_excel
+        excel_data = convert_df_to_excel(df_download)
+        
         st.download_button(
-            label="📥 Unduh Data (CSV)",
-            data=csv,
-            file_name=f"shipping_data_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
+             label="📥 Unduh Data (Excel)",
+             data=excel_data,
+             file_name=f"PTSP_Data_Pengiriman_{datetime.now().strftime('%Y%m%d')}.xlsx",
+             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+             type="primary"
         )
+
