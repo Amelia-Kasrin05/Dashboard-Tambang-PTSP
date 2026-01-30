@@ -63,19 +63,19 @@ def main():
         # Route to pages
         menu = st.session_state.current_menu
         
-        if menu == "Ringkasan Eksekutif" or menu == "Executive Summary": # Keep compat or just switch
+        if menu == "Ringkasan Eksekutif" or menu == "Executive Summary":
             show_dashboard()
-        elif menu == "Produksi":
+        elif menu == "Kinerja Produksi" or menu == "Produksi":
             show_produksi()
-        elif menu == "Ritase":
+        elif menu == "Aktivitas Ritase" or menu == "Ritase":
             show_ritase()
-        elif menu == "Stockpile & Proses":
+        elif menu == "Stockpile & Pengolahan" or menu == "Stockpile & Proses":
             show_process()
-        elif menu == "Gangguan Unit" or menu == "Gangguan":
+        elif menu == "Analisa Kendala" or menu == "Gangguan Unit":
             show_gangguan()
         elif menu == "Pengiriman & Logistik":
             show_shipping()
-        elif menu == "Daily Plan":
+        elif menu == "Rencana Harian" or menu == "Daily Plan":
             show_daily_plan()
         else:
             show_dashboard()

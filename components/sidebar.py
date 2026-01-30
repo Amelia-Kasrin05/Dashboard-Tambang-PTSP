@@ -151,12 +151,12 @@ def render_sidebar():
         
         menus = [
             ("🏠", "Ringkasan Eksekutif"),
-            ("⛏️", "Produksi"),
-            ("🚛", "Ritase"),
-            ("⚙️", "Stockpile & Proses"),
-            ("🚨", "Gangguan Unit"),
+            ("⛏️", "Kinerja Produksi"),
+            ("🚛", "Aktivitas Ritase"),
+            ("⚙️", "Stockpile & Pengolahan"),
+            ("🚨", "Analisa Kendala"),
             ("🚢", "Pengiriman & Logistik"),
-            ("📋", "Daily Plan")
+            ("📋", "Rencana Harian")
         ]
         
         for icon, menu in menus:
