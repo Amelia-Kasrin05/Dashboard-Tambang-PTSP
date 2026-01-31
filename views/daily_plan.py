@@ -350,132 +350,202 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
             'color': BOX_COLOR 
         })
 
-    # COLLISION AVOIDANCE ALGORITHM
-    # Sort by Y (top to bottom) then X (left to right)
+    # COLLISION AVOIDANCE ALGORITHM (SPIRAL GREEDY SEARCH V3 - USABLE AREA)
+    # ---------------------------------------------------------------------
+    # 1. Flexible Spiral Search for Label Boxes
+    # 2. Strict Usable Area Clamping (Exclude Legend/Borders)
+    # 3. Enhanced Channel Allocator for Leader Lines (Anti-Overlap)
+    
+    # Define USABLE MAP AREA (Estimate from image)
+    # Legend is on Right side. Bottom has labels.
+    # Map Width 1400. Legend seems to take ~300px.
+    USABLE_MIN_X = 50
+    USABLE_MAX_X = MAP_WIDTH - 350 # Increased margin to avoid Legend
+    USABLE_MIN_Y = 50
+    USABLE_MAX_Y = MAP_HEIGHT - 60
+    
     annotations.sort(key=lambda k: (-k['y'], k['x']))
     
-    # Simple bounding box representation
-    # Assume box size approx 120x70
-    BOX_W = 140 # Increased more for safety padding
-    BOX_H = 90  # Increased more for safety vertical padding
+    placed_boxes = [] # List of {x, y, w, h}
     
-    placed_boxes = [] # List of {'x', 'y', 'w', 'h'} representing occupied LABEL space
+    # Parameters
+    BOX_W = 140 
+    BOX_H = 100 
     
+    # Helper: Absolute Boundary Clamp
+    def safe_clamp(val, min_val, max_val):
+        return max(min_val, min(max_val, val))
+
+    # Helper: Check collision
+    def check_collision(cx, cy, boxes):
+        # Strict margin check against USABLE AREA
+        margin_w = BOX_W/2 + 10
+        margin_h = BOX_H/2 + 10
+        
+        if cx < USABLE_MIN_X + margin_w or cx > USABLE_MAX_X - margin_w: return True
+        if cy < USABLE_MIN_Y + margin_h or cy > USABLE_MAX_Y - margin_h: return True
+        
+        # Check vs other boxes
+        for b in boxes:
+            pad = 10 
+            if (abs(cx - b['x']) * 2 < (BOX_W + b['w'] + pad) and 
+                abs(cy - b['y']) * 2 < (BOX_H + b['h'] + pad)):
+                return True
+        return False
+
+    final_placements = []
+
     for ann in annotations:
-        target_x, target_y = ann['x'], ann['y']
+        t_x, t_y = ann['x'], ann['y']
         
-        # Determine preferred direction
-        # N8 Special Case -> LEFT
-        if ann['loc_id'] == 'N8':
-             direction = -1
-        # SP3 Special Case -> RIGHT (so it doesn't go off screen left)
-        elif ann['loc_id'] == 'SP3':
-             direction = 1 
-        elif target_x < 200: direction = 1 # RIGHT (near left edge)
-        elif target_x > MAP_WIDTH - 200: direction = -1 # LEFT (near right edge)
+        # Spiral Radii - start small, go big
+        radii = [130, 160, 200, 250, 320, 400]
+        
+        # Determine logical center of usable area for biasing
+        usable_center_x = (USABLE_MIN_X + USABLE_MAX_X) / 2
+        
+        # Angles
+        # If target is left of center, prefer searching Left/Top/Bottom
+        if t_x < usable_center_x:
+            # Prefers Left (180)
+            angles = [180, 150, 210, 120, 240, 90, 270, 0] 
         else:
-            # Default split
-            direction = -1 if target_x < 450 else 1
+            # Prefers Right (0) - but confined by legend
+            angles = [0, 30, 330, 60, 300, 90, 270, 180]
             
-        # Initial Label Position Candidate
-        # INCREASED DISTANCE so box doesn't overlap the elbow line
-        # Box Half Width = 70. Elbow dist = 30.
-        # Min dist = 70 + 30 + buffer = ~120
-        offset_dist = 150 
+        full_angles = angles
         
-        label_x = target_x + (direction * offset_dist)
-        label_y = target_y # Start at same level
+        # Specific overrides
+        if ann.get('loc_id') == 'SP3': full_angles = [180, 150, 210] 
+        if ann.get('loc_id') == 'N8': full_angles = [180, 150, 210] 
         
-        # Try to place label, adjusting Y if collision
-        # Candidate positions: Center, Up, Down, Further Up, Further Down...
-        # Increased steps for better spreading
-        candidates = [0, 80, -80, 160, -160, 240, -240]
+        best_x, best_y = t_x, t_y
+        found = False
+        import math
         
-        best_x, best_y = label_x, label_y
-        found_spot = False
-        
-        for dy in candidates:
-            test_x = label_x
-            test_y = label_y + dy
-            
-            # Boundary check
-            if test_x < BOX_W/2 or test_x > MAP_WIDTH - BOX_W/2: continue
-            if test_y < BOX_H/2 or test_y > MAP_HEIGHT - BOX_H/2: continue
-            
-            # Collision check with existing LABELS
-            collision = False
-            for box in placed_boxes:
-                # Check overlap: abs(dx) * 2 < (w1 + w2) && abs(dy) * 2 < (h1 + h2)
-                # w1+w2 here includes the built-in padding in BOX_W/H
-                if (abs(test_x - box['x']) * 2 < (BOX_W + box['w']) and 
-                    abs(test_y - box['y']) * 2 < (BOX_H + box['h'])):
-                    collision = True
+        for r in radii:
+            for angle_deg in full_angles:
+                angle_rad = math.radians(angle_deg)
+                c_x = t_x + r * math.cos(angle_rad)
+                c_y = t_y + r * math.sin(angle_rad)
+                
+                if not check_collision(c_x, c_y, placed_boxes):
+                    best_x, best_y = c_x, c_y
+                    found = True
                     break
-            
-            if not collision:
-                best_x, best_y = test_x, test_y
-                found_spot = True
-                # If we moved Y significantly, maybe push X out a bit too to make corner cleaner
-                if abs(dy) > 0:
-                     best_x = label_x + (direction * 10) 
-                break
+            if found: break
         
-        # If no spot found (very crowded), just take the furthest offset or fallback
-        # Shift X out further to try and clear it
-        if not found_spot:
-             best_x = label_x + (direction * 80) # Push out more
-             best_y = label_y # reset Y
+        # Fallback: Push inwards to usable area
+        if not found:
+            # Just try to clamp target + some offset
+            # Push towards center
+            dir_to_center = 1 if t_x < usable_center_x else -1
+            best_x = t_x + (dir_to_center * 150)
+            best_y = t_y
         
-        # --- STRICT BOUNDARY CLAMPING ---
-        # Ensure label stays strictly inside map
-        margin_x = BOX_W / 2 + 10
-        margin_y = BOX_H / 2 + 10
+        # STRICT FINAL CLAMP TO USABLE AREA
+        margin_w = BOX_W/2 + 5
+        margin_h = BOX_H/2 + 5
+        best_x = safe_clamp(best_x, USABLE_MIN_X + margin_w, USABLE_MAX_X - margin_w)
+        best_y = safe_clamp(best_y, USABLE_MIN_Y + margin_h, USABLE_MAX_Y - margin_h)
         
-        if best_x < margin_x: best_x = margin_x
-        if best_x > MAP_WIDTH - margin_x: best_x = MAP_WIDTH - margin_x
-        if best_y < margin_y: best_y = margin_y
-        if best_y > MAP_HEIGHT - margin_y: best_y = MAP_HEIGHT - margin_y
-        
-        # Register placed box
         placed_boxes.append({'x': best_x, 'y': best_y, 'w': BOX_W, 'h': BOX_H})
+        final_placements.append({
+            'ann': ann,
+            'x': best_x,
+            'y': best_y,
+            'tx': t_x,
+            'ty': t_y
+        })
+
+    # SMART L-SHAPE ROUTER
+    # --------------------
+    # Prioritizes simple 1-turn lines for maximum aesthetics ("Technical look").
+    # Hybrid logic: Vertical First (Flagpole) vs Horizontal First (Shelf).
+    
+    for p in final_placements:
+        ann = p['ann']
+        l_x, l_y = p['x'], p['y']
+        t_x, t_y = p['tx'], p['ty']
         
-        # Create Path
-        # Determine elbow point
-        elbow_dist = 30
-        elbow_x = target_x + (direction * elbow_dist)
-        
-        # Calculate Box Edge Intersection point for clean line connection
-        # If box is to right (dir=1), line enters Left Edge (center - width/2)
-        # If box is to left (dir=-1), line enters Right Edge (center + width/2)
-        # We use a narrower box width for visual connector (100px) to ensure it tucks in
         visual_box_w = 110
+        visual_box_h = 70 
         
-        # Determine effective direction based on final position vs target
-        final_dir = 1 if best_x > target_x else -1
-        box_edge_x = best_x - (final_dir * (visual_box_w / 2 - 5)) 
+        # Define Box Bounds
+        box_left = l_x - visual_box_w/2
+        box_right = l_x + visual_box_w/2
+        box_top = l_y + visual_box_h/2 # Plotly Y is up? Need to verify. 
+        # Assuming our coordinates: Y increases upwards.
+        # box_top is higher Y value.
+        box_bottom = l_y - visual_box_h/2
         
-        path_svg = f"M {target_x},{target_y} L {elbow_x},{target_y} L {elbow_x},{best_y} L {box_edge_x},{best_y}"
+        path_svg = ""
         
-        # Add to Figure
+        # LOGIC:
+        # Check if Target X is "inside" the Box's X-shadow (column).
+        # If Target is horizontally aligned with box -> Must go SIDEWAYS first (Horizontal First).
+        # Else (Target is clearly Left/Right of box) -> Go VERTICAL first (Flagpole).
+        
+        is_target_in_x_shadow = (t_x >= box_left - 10) and (t_x <= box_right + 10)
+        
+        if not is_target_in_x_shadow:
+            # FLAGPOLE STYLE (Vertical, then Horizontal)
+            # 1. Start at Target
+            # 2. Go Up/Down to Box Y-Level (use box side anchor)
+            # 3. Turn Horizontal to Box Side
+            
+            # Determine connect side
+            if l_x > t_x: # Box is Right
+                anchor_x = box_left
+            else: # Box is Left
+                anchor_x = box_right
+            
+            # Corner Point
+            corner_x = t_x
+            corner_y = l_y
+            
+            # Draw: T(tx,ty) -> C(tx,ly) -> A(anchor_x,ly)
+            path_svg = f"M {t_x},{t_y} L {t_x},{l_y} L {anchor_x},{l_y}"
+            
+        else:
+            # SHELF STYLE (Horizontal, then Vertical)
+            # Target is directly above/below box. Vertical line would cut through box.
+            # So: Go Sideways out of target, then Up/Down to Box Side.
+            # Or: Go Up/Down to Box Top/Bottom?
+            
+            # Let's try "Snap to Top/Bottom"
+            is_target_above = t_y > l_y
+            
+            if is_target_above: # Target Above
+                # Connect to Box Top
+                anchor_y = box_top + 5
+                # Path: T(tx,ty) -> (tx, anchor_y). Straight Vertical Line.
+                # Simple and clean.
+                path_svg = f"M {t_x},{t_y} L {t_x},{anchor_y}"
+            else: # Target Below
+                # Connect to Box Bottom
+                anchor_y = box_bottom - 5
+                path_svg = f"M {t_x},{t_y} L {t_x},{anchor_y}"
+                
         # 1. Elbow Line
         fig.add_shape(
             type="path",
             path=path_svg,
             line=dict(color=ann['color'], width=2),
-            layer="above" # Draw ABOVE map, visible, but clipped to box edge
+            layer="above" 
         )
         
         # 2. Box Annotation
         fig.add_annotation(
-            x=best_x,
-            y=best_y, 
+            x=l_x,
+            y=l_y, 
             text=ann['text'],
             showarrow=False, 
             bgcolor=ann['color'], 
             bordercolor='white',
             borderwidth=1,
             borderpad=4,
-            font=dict(size=9, color='black', family='Arial, sans-serif'), # Revert to black text
+            font=dict(size=9, color='black', family='Arial, sans-serif'), 
             opacity=0.9, 
             align='center',
             captureevents=True,
@@ -484,8 +554,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         
         # 3. Target Dot
         fig.add_trace(go.Scatter(
-            x=[target_x],
-            y=[target_y],
+            x=[t_x],
+            y=[t_y],
             mode='markers',
             marker=dict(size=12, color=ann['color'], line=dict(color='white', width=2)),
             hoverinfo='text',
