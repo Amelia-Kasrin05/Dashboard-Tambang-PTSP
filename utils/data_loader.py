@@ -1774,21 +1774,20 @@ def load_stockpile_hopper():
     Scans for header row containing 'Date', 'Time', 'Shift', 'Dumping', 'Ritase', 'Rit'.
     """
     try:
-        path = None
+        source = None
         if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            path = MONITORING_EXCEL_PATH
+            source = MONITORING_EXCEL_PATH
         elif ONEDRIVE_LINKS.get("monitoring"):
-             # Fallback to OneDrive buffer if implemented
-             pass
+             source = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
         else:
-            # Fallback local check
-            local_path = load_from_local("monitoring")
-            if local_path: path = local_path
+             # Fallback local check
+             local_path = load_from_local("monitoring")
+             if local_path: source = local_path
         
-        if path:
+        if source:
             # 1. Read a chunk of rows to find the header (e.g., first 5000 rows)
             # User screenshot shows header at ~3400, so we need a deep scan.
-            df_raw = pd.read_excel(path, sheet_name='Stockpile Hopper', header=None, nrows=5000)
+            df_raw = pd.read_excel(source, sheet_name='Stockpile Hopper', header=None, nrows=5000)
             
             header_idx = None
             for i in range(len(df_raw)):
@@ -1801,7 +1800,9 @@ def load_stockpile_hopper():
             if header_idx is not None:
                 # Reload with correct header (Read FULL file)
                 # Note: header_idx is 0-based.
-                df = pd.read_excel(path, sheet_name='Stockpile Hopper', header=header_idx)
+                if hasattr(source, 'seek'):
+                    source.seek(0)
+                df = pd.read_excel(source, sheet_name='Stockpile Hopper', header=header_idx)
                 
                 # Preserve Excel Row Order
                 df['Row_Order'] = df.index
