@@ -34,7 +34,13 @@ except ImportError:
 
 # File paths
 ONEDRIVE_FILE = r"C:\Users\user\OneDrive\Dashboard_Tambang\DAILY_PLAN.xlsx"
-MAP_IMAGE_PATH = r"D:\Dashboard-Tambang-PTSP\assets\peta_grid_tambang_opt.jpg"
+
+try:
+    from config.settings import ASSETS_DIR
+    MAP_IMAGE_PATH = str(ASSETS_DIR / "peta_grid_tambang_opt.jpg")
+except ImportError:
+    # Fallback for local testing if config missing
+    MAP_IMAGE_PATH = "assets/peta_grid_tambang_opt.jpg"
 
 # ============================================================
 # DATA LOADER
