@@ -30,10 +30,10 @@ GANGGUAN_FILE = os.getenv("GANGGUAN_FILE", GANGGUAN_EXCEL_PATH)
 # Format: "https://1drv.ms/x/s!Am..."
 # NOTE: Ensure the link permission is set to "Anyone with the link" (Public)
 ONEDRIVE_LINKS = {
-    "produksi": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQAPusaXTuXzSY5zczqnC8kQAfjIsk5HoW2DUkcXrx8rA0k?e=5f4YTI",        # Produksi
-    "gangguan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCYC0kc9LmtQLaWebT-BykIAeJQWWZpWyTzqDjNvdsSiIk?e=wH6son",        # Gangguan
-    "monitoring": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQBwKzPpyWEAQJXt68FF5X01Afja8myfAwYlE_0FTgkjUtI?e=HuRDiH",      # Monitoring
-    "daily_plan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDqDDN8gyy4TI4Eac8mUlLTAXRVV5_jwYl1sj0iQs9rwRo?e=O6N0T0",      # Daily Plan
+    "produksi": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDvrAVlr7kFSrpX8-QHXuOnAd7QThWBm_Q2N5J7gzjuLSk?e=KRRRs1",        # Produksi
+    "gangguan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQC0vxKHmHKqQb1xtVoNmbVbAbVkNIf6HNZ3NHs6Ja0w0Wc?e=YHAgTD",        # Gangguan
+    "monitoring": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCjeUwfc43DRJf4GO-ZcP42ASvhhEDn2xJj6HfDtE7ezlc?e=pqHs9l",      # Monitoring
+    "daily_plan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCdHgs2Q48oS6df5eUtFl2VAQXoPUVPMPSKVraYYeJF4d4?e=gtrFsF",      # Daily Plan
     "shipping": "",   # Paste Link for Shipping.xlsx
     "stockpile": ""   # Paste Link for Stockpile.xlsx
 }

@@ -291,6 +291,11 @@ def load_produksi():
             if target_sheets:
                 sheets_to_process = target_sheets
             else:
+                # If no 2026 sheet found, do NOT load anything (or fallback to empty list if strict)
+                # Current logic allowed fallback to 'not system sheets' - keeping that for safety 
+                # unless user wants STRICT 2026 ONLY. 
+                # User said "baca 2026 dan seterusnya".
+                # Let's keep the fallback for now but ensure 2026 is top priority.
                 sheets_to_process = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
                 
             for sheet in sheets_to_process:
