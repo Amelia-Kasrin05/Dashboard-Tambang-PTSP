@@ -280,87 +280,87 @@ def load_produksi():
 
     # Generic loader that handles both Path and BytesIO
     def load_content(source):
-        try:
-            xls = pd.ExcelFile(source)
-            valid_dfs = []
+        # try:
+        xls = pd.ExcelFile(source)
+        valid_dfs = []
+        
+        # Prioritize "Tahun" sheets, but check all
+        # User specific request: Focus PURELY on "2026" if available
+        target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
+        
+        if target_sheets:
+            sheets_to_process = target_sheets
+        else:
+            # If no 2026 sheet found, do NOT load anything (or fallback to empty list if strict)
+            # Current logic allowed fallback to 'not system sheets' - keeping that for safety 
+            # unless user wants STRICT 2026 ONLY. 
+            # User said "baca 2026 dan seterusnya".
+            # Let's keep the fallback for now but ensure 2026 is top priority.
+            sheets_to_process = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
             
-            # Prioritize "Tahun" sheets, but check all
-            # User specific request: Focus PURELY on "2026" if available
-            target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
-            
-            if target_sheets:
-                sheets_to_process = target_sheets
-            else:
-                # If no 2026 sheet found, do NOT load anything (or fallback to empty list if strict)
-                # Current logic allowed fallback to 'not system sheets' - keeping that for safety 
-                # unless user wants STRICT 2026 ONLY. 
-                # User said "baca 2026 dan seterusnya".
-                # Let's keep the fallback for now but ensure 2026 is top priority.
-                sheets_to_process = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
+        for sheet in sheets_to_process:
+            # Skip obviously non-data sheets
+            if sheet.lower() in ['menu', 'dashboard', 'summary', 'ref', 'config']:
+                continue
                 
-            for sheet in sheets_to_process:
-                # Skip obviously non-data sheets
-                if sheet.lower() in ['menu', 'dashboard', 'summary', 'ref', 'config']:
-                    continue
-                    
-                # try:
-                # STRATEGY 2026: DIRECT READ (Since we verified format in debug)
-                if '2026' in str(sheet):
-                    temp_df = pd.read_excel(xls, sheet_name=sheet) # Auto header (0)
-                    
-                    # Fix column names just in case
-                    temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                    
-                    # Ensure 'Date' exists
-                    if 'Date' not in temp_df.columns:
-                        # Fallback map
-                            if 'Tanggal' in temp_df.columns:
-                                temp_df = temp_df.rename(columns={'Tanggal': 'Date'})
-                    
-                    if 'Date' in temp_df.columns:
-                            # Basic validation
-                            valid_dfs.append(temp_df)
-                            continue # Success, move to next sheet
+            # try:
+            # STRATEGY 2026: DIRECT READ (Since we verified format in debug)
+            if '2026' in str(sheet):
+                temp_df = pd.read_excel(xls, sheet_name=sheet) # Auto header (0)
                 
-                # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
-                # Smart Header Detection: Read first 30 rows
-                df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30)
+                # Fix column names just in case
+                temp_df.columns = [str(c).strip() for c in temp_df.columns]
                 
-                header_idx = -1
-                for i in range(len(df_raw)):
-                    row_vals = [str(x).strip().lower() for x in df_raw.iloc[i].tolist()]
-                    has_shift = 'shift' in row_vals
-                    if has_shift:
-                        header_idx = i
-                        break
+                # Ensure 'Date' exists
+                if 'Date' not in temp_df.columns:
+                    # Fallback map
+                        if 'Tanggal' in temp_df.columns:
+                            temp_df = temp_df.rename(columns={'Tanggal': 'Date'})
                 
-                if header_idx != -1:
-                    temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
-                    temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                    
-                    if 'Date' not in temp_df.columns:
-                        for c in temp_df.columns:
-                            c_str = str(c).lower()
-                            if 'date' in c_str or 'tanggal' in c_str :
-                                temp_df = temp_df.rename(columns={c: 'Date'})
-                                break
-                    
-                    if 'Date' in temp_df.columns:
-                        temp_df['Date'] = temp_df['Date'].ffill()
-
-                    if is_valid_prod(temp_df):
+                if 'Date' in temp_df.columns:
+                        # Basic validation
                         valid_dfs.append(temp_df)
-                        
-                # except Exception as e:
-                #     continue
+                        continue # Success, move to next sheet
             
-            if valid_dfs:
-                return pd.concat(valid_dfs, ignore_index=True)
-            else:
-                return None
+            # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
+            # Smart Header Detection: Read first 30 rows
+            df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30)
+            
+            header_idx = -1
+            for i in range(len(df_raw)):
+                row_vals = [str(x).strip().lower() for x in df_raw.iloc[i].tolist()]
+                has_shift = 'shift' in row_vals
+                if has_shift:
+                    header_idx = i
+                    break
+            
+            if header_idx != -1:
+                temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
+                temp_df.columns = [str(c).strip() for c in temp_df.columns]
                 
-        except Exception as e:
+                if 'Date' not in temp_df.columns:
+                    for c in temp_df.columns:
+                        c_str = str(c).lower()
+                        if 'date' in c_str or 'tanggal' in c_str :
+                            temp_df = temp_df.rename(columns={c: 'Date'})
+                            break
+                
+                if 'Date' in temp_df.columns:
+                    temp_df['Date'] = temp_df['Date'].ffill()
+
+                if is_valid_prod(temp_df):
+                    valid_dfs.append(temp_df)
+                    
+            # except Exception as e:
+            #     continue
+        
+        if valid_dfs:
+            return pd.concat(valid_dfs, ignore_index=True)
+        else:
             return None
+                
+        # except Exception as e:
+        #     return None
         return None
 
 
