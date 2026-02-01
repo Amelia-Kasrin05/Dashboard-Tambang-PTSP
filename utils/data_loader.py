@@ -303,56 +303,56 @@ def load_produksi():
                 if sheet.lower() in ['menu', 'dashboard', 'summary', 'ref', 'config']:
                     continue
                     
-                try:
-                    # STRATEGY 2026: DIRECT READ (Since we verified format in debug)
-                    if '2026' in str(sheet):
-                        temp_df = pd.read_excel(xls, sheet_name=sheet) # Auto header (0)
-                        
-                        # Fix column names just in case
-                        temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                        
-                        # Ensure 'Date' exists
-                        if 'Date' not in temp_df.columns:
-                            # Fallback map
-                             if 'Tanggal' in temp_df.columns:
-                                 temp_df = temp_df.rename(columns={'Tanggal': 'Date'})
-                        
-                        if 'Date' in temp_df.columns:
-                             # Basic validation
-                             valid_dfs.append(temp_df)
-                             continue # Success, move to next sheet
+                # try:
+                # STRATEGY 2026: DIRECT READ (Since we verified format in debug)
+                if '2026' in str(sheet):
+                    temp_df = pd.read_excel(xls, sheet_name=sheet) # Auto header (0)
                     
-                    # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
-                    # Smart Header Detection: Read first 30 rows
-                    df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30)
+                    # Fix column names just in case
+                    temp_df.columns = [str(c).strip() for c in temp_df.columns]
                     
-                    header_idx = -1
-                    for i in range(len(df_raw)):
-                        row_vals = [str(x).strip().lower() for x in df_raw.iloc[i].tolist()]
-                        has_shift = 'shift' in row_vals
-                        if has_shift:
-                            header_idx = i
-                            break
+                    # Ensure 'Date' exists
+                    if 'Date' not in temp_df.columns:
+                        # Fallback map
+                            if 'Tanggal' in temp_df.columns:
+                                temp_df = temp_df.rename(columns={'Tanggal': 'Date'})
                     
-                    if header_idx != -1:
-                        temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
-                        temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                        
-                        if 'Date' not in temp_df.columns:
-                            for c in temp_df.columns:
-                                c_str = str(c).lower()
-                                if 'date' in c_str or 'tanggal' in c_str :
-                                    temp_df = temp_df.rename(columns={c: 'Date'})
-                                    break
-                        
-                        if 'Date' in temp_df.columns:
-                            temp_df['Date'] = temp_df['Date'].ffill()
-
-                        if is_valid_prod(temp_df):
+                    if 'Date' in temp_df.columns:
+                            # Basic validation
                             valid_dfs.append(temp_df)
-                            
-                except Exception as e:
-                    continue
+                            continue # Success, move to next sheet
+                
+                # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
+                # Smart Header Detection: Read first 30 rows
+                df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30)
+                
+                header_idx = -1
+                for i in range(len(df_raw)):
+                    row_vals = [str(x).strip().lower() for x in df_raw.iloc[i].tolist()]
+                    has_shift = 'shift' in row_vals
+                    if has_shift:
+                        header_idx = i
+                        break
+                
+                if header_idx != -1:
+                    temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
+                    temp_df.columns = [str(c).strip() for c in temp_df.columns]
+                    
+                    if 'Date' not in temp_df.columns:
+                        for c in temp_df.columns:
+                            c_str = str(c).lower()
+                            if 'date' in c_str or 'tanggal' in c_str :
+                                temp_df = temp_df.rename(columns={c: 'Date'})
+                                break
+                    
+                    if 'Date' in temp_df.columns:
+                        temp_df['Date'] = temp_df['Date'].ffill()
+
+                    if is_valid_prod(temp_df):
+                        valid_dfs.append(temp_df)
+                        
+                # except Exception as e:
+                #     continue
             
             if valid_dfs:
                 return pd.concat(valid_dfs, ignore_index=True)
