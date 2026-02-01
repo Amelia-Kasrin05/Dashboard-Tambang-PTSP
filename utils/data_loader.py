@@ -15,10 +15,10 @@ from datetime import datetime, timedelta
 from datetime import datetime, timedelta
 
 # Import Settings
+# Import Settings
 try:
-    from config.settings import MONITORING_EXCEL_PATH, PRODUKSI_FILE, GANGGUAN_FILE, CACHE_TTL
-    # Backwards compatibility for other modules
-    ONEDRIVE_LINKS = {} 
+    from config.settings import MONITORING_EXCEL_PATH, PRODUKSI_FILE, GANGGUAN_FILE, CACHE_TTL, ONEDRIVE_LINKS
+    
     LOCAL_FILE_NAMES = {
         "monitoring": [MONITORING_EXCEL_PATH, r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring_2025_.xlsx"],
         "produksi": [PRODUKSI_FILE, r"C:\Users\user\OneDrive\Dashboard_Tambang\Produksi_UTSG_Harian.xlsx"],
@@ -267,263 +267,128 @@ def normalize_excavator_column(df):
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_produksi():
-    """Load data produksi - FIXED for Excel serial dates"""
-    st.write("DEBUG: 🚀 Entering load_produksi() function")
-    
+    """Load data produksi - FIXED & ROBUST for OneDrive"""
     df = None
     
-    # Helper to validate if sheet has minimum required columns
-    def is_valid_prod(d):
-        if d is None or d.empty: return False
-        cols = [str(c).lower() for c in d.columns]
-        # Check for essential columns (relaxed)
-        return any('shift' in c for c in cols) and (any('date' in c or 'tanggal' in c for c in cols))
-
-    # Generic loader that handles both Path and BytesIO
+    # Generic loader
     def load_content(source):
-        # try:
-        xls = pd.ExcelFile(source)
-        valid_dfs = []
-        
-        # Prioritize "Tahun" sheets, but check all
-        # User specific request: Focus PURELY on "2026" if available
-        target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
-        
-        if target_sheets:
-            sheets_to_process = target_sheets
-            st.write(f"DEBUG: Found Target Sheets: {sheets_to_process}")
-        else:
-            sheets_to_process = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
-            st.write(f"DEBUG: No Specific Target. Scanning: {sheets_to_process}")
+        try:
+            xls = pd.ExcelFile(source)
+            valid_dfs = []
             
-        for sheet in sheets_to_process:
-            st.write(f"DEBUG: Processing Sheet: {sheet}")
-            # Skip obviously non-data sheets
-            if sheet.lower() in ['menu', 'dashboard', 'summary', 'ref', 'config']:
-                continue
-                
-            # try:
-            # STRATEGY 2026: DIRECT READ (Since we verified format in debug)
-            if '2026' in str(sheet):
-                temp_df = pd.read_excel(xls, sheet_name=sheet) # Auto header (0)
-                
-                # Fix column names just in case
-                temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                
-                # Ensure 'Date' exists
-                if 'Date' not in temp_df.columns:
-                    # Fallback map
-                        if 'Tanggal' in temp_df.columns:
-                            temp_df = temp_df.rename(columns={'Tanggal': 'Date'})
-                
-                if 'Date' in temp_df.columns:
-                        # Basic validation
-                        valid_dfs.append(temp_df)
-                        st.write(f"DEBUG: Sheet '{sheet}' Accepted ✅")
-                        continue # Success, move to next sheet
-                else:
-                    st.write(f"DEBUG: Sheet '{sheet}' Rejected ❌. Columns: {temp_df.columns.tolist()}")
+            # STRATEGY: Aggressively find '2026' sheets
+            target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
             
-            # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
-            # Smart Header Detection: Read first 30 rows
-            df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30)
+            # Fallback: if no 2026, take non-system sheets
+            if not target_sheets:
+                target_sheets = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
             
-            header_idx = -1
-            for i in range(len(df_raw)):
-                row_vals = [str(x).strip().lower() for x in df_raw.iloc[i].tolist()]
-                has_shift = 'shift' in row_vals
-                if has_shift:
-                    header_idx = i
-                    break
-            
-            if header_idx != -1:
-                temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
-                temp_df.columns = [str(c).strip() for c in temp_df.columns]
-                
-                if 'Date' not in temp_df.columns:
-                    for c in temp_df.columns:
-                        c_str = str(c).lower()
-                        if 'date' in c_str or 'tanggal' in c_str :
-                            temp_df = temp_df.rename(columns={c: 'Date'})
-                            break
-                
-                if 'Date' in temp_df.columns:
-                    temp_df['Date'] = temp_df['Date'].ffill()
-
-                if is_valid_prod(temp_df):
-                    valid_dfs.append(temp_df)
+            for sheet in target_sheets:
+                try:
+                    # Read sheet
+                    temp_df = pd.read_excel(xls, sheet_name=sheet)
                     
-            # except Exception as e:
-            #     continue
-        
-        if valid_dfs:
-            return pd.concat(valid_dfs, ignore_index=True)
-        else:
-            return None
-                
-        # except Exception as e:
-        #     return None
-        return None
-
-
-    # 1. Try Local First (Faster)
-    local_path = load_from_local("produksi")
-    st.write(f"DEBUG: Local Path Check Result: {local_path}")
-    
-    if local_path:
-        st.write("DEBUG: Attempting to load from LOCAL...")
-        df = load_content(local_path)
-        st.write(f"DEBUG: Local Load Result (df is None?): {df is None}")
-
-    # 2. Try OneDrive if Local failed (Cloud/Deployment)
-    if df is None:
-        st.write("DEBUG: Local failed/empty. Checking OneDrive Config...")
-        link_prod = ONEDRIVE_LINKS.get("produksi")
-        st.write(f"DEBUG: OneDrive Link Configured: {link_prod}")
-        
-        if link_prod:
-            st.write("DEBUG: Attempting to DOWNLOAD from OneDrive...")
-            file_buffer = download_from_onedrive(link_prod)
-            st.write(f"DEBUG: Download Result Buffer Size: {len(file_buffer.getvalue()) if file_buffer else 'None'}")
+                    # 1. Clean Column Names
+                    temp_df.columns = [str(c).strip() for c in temp_df.columns]
+                    
+                    # 2. Map Critical Columns (Date)
+                    # Find any column that looks like 'Date' or 'Tanggal'
+                    col_date = next((c for c in temp_df.columns if 'date' in c.lower() or 'tanggal' in c.lower()), None)
+                    if col_date:
+                        temp_df = temp_df.rename(columns={col_date: 'Date'})
+                    
+                    # 3. Map Critical Columns (Shift)
+                    col_shift = next((c for c in temp_df.columns if 'shift' in c.lower()), None)
+                    if col_shift:
+                        temp_df = temp_df.rename(columns={col_shift: 'Shift'})
+                        
+                    # Standardize Date
+                    if 'Date' in temp_df.columns:
+                        temp_df['Date'] = safe_parse_date_column(temp_df['Date'])
+                        temp_df = temp_df.dropna(subset=['Date']) # Keep only valid dates
+                        
+                        # Add to list if we have data
+                        if not temp_df.empty:
+                            valid_dfs.append(temp_df)
+                            
+                except Exception as e:
+                    continue # Skip bad sheets
             
-            if file_buffer:
-                st.write("DEBUG: Attempting to Parse Downloaded Buffer...")
-                df = load_content(file_buffer)
-                st.write(f"DEBUG: OneDrive Parse Result (df is None?): {df is None}")
-    
-    if df is None:
-        st.error("❌ FINAL ERROR: df is still None after all attempts.")
-        return pd.DataFrame()
-    
+            if valid_dfs:
+                return pd.concat(valid_dfs, ignore_index=True)
+            return None
+            
+        except Exception as e:
+            return None
 
+    # 1. Try Local
+    local_path = load_from_local("produksi")
+    if local_path:
+        df = load_content(local_path)
+
+    # 2. Try OneDrive
+    if df is None and ONEDRIVE_LINKS.get("produksi"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"])
+        if file_buffer:
+            df = load_content(file_buffer)
+    
+    if df is None or df.empty:
+        return pd.DataFrame() # Return empty if all fails
+    
+    # ---------------------------------------------------------
+    # POST-PROCESSING (Cleaning & normalization)
+    # ---------------------------------------------------------
     try:
-        # Dynamic Header Detection
-        # Search for row containing 'Excavator' or 'Tonnase'
-        if 'Excavator' not in df.columns and 'Tonnase' not in df.columns:
-            for i in range(min(10, len(df))):
-                row_values = df.iloc[i].astype(str).values
-                # Check for key keywords
-                if any('Excavator' in v for v in row_values) or any('Tonnase' in v for v in row_values):
-                    df.columns = df.iloc[i]
-                    df = df.iloc[i+1:]
-                    break
-        
-        # Cleanup Column Names
-        df.columns = [str(c).strip() for c in df.columns]
-        st.write(f"DEBUG: Loaded Raw. Shape: {df.shape}")
-        
-        # Standardize Date Column
-        col_date = next((c for c in df.columns if 'Date' in c or 'Tanggal' in c), 'Date')
-        df = df.rename(columns={col_date: 'Date'})
-
-        # Robust Shift Filtering
+        # Normalize Shift if exists
         if 'Shift' in df.columns:
-            # Normalize whitespace and mixed types
             df['Shift'] = df['Shift'].astype(str).str.strip()
-            # Catch "Shift 1", "1", "Shift 2", "2", etc.
-            valid_shifts = ['Shift 1', 'Shift 2', 'Shift 3', '1', '2', '3']
-            df = df[df['Shift'].isin(valid_shifts)]
-        st.write(f"DEBUG: After Shift Filter. Shape: {df.shape}")
-        
-        # ✅ FIX: Parse Excel Serial Date
-        df['Date'] = safe_parse_date_column(df['Date'])
-        
-        # Remove invalid dates
-        df = df[df['Date'].notna()]
-        st.write(f"DEBUG: After Date Filter. Shape: {df.shape}")
+            # Normalize specific values
+            df['Shift'] = df['Shift'].replace({
+                '1': 'Shift 1', '2': 'Shift 2', '3': 'Shift 3',
+                '1.0': 'Shift 1', '2.0': 'Shift 2', '3.0': 'Shift 3'
+            })
         
         # Parse Time
-        if 'Time' in df.columns:
-            df['Time'] = df['Time'].astype(str).fillna('')
+        col_time = next((c for c in df.columns if 'time' in c.lower() or 'jam' in c.lower()), None)
+        if col_time:
+             df = df.rename(columns={col_time: 'Time'})
+             df['Time'] = df['Time'].astype(str).fillna('')
         else:
             df['Time'] = ''
-        
-        # Check if BLOK column exists (if not, columns are shifted)
-        # Often occurs if 'No' column is missing or added
-        if 'BLOK' not in df.columns and 'Front' in df.columns:
-             # Try to map intelligently
-             pass # Assume if Front exists it's okay for now, or map Front -> BLOK?
-             
-        # Column Mapping Safety
-        # Ensure we have: BLOK, Front, Commudity, Excavator, Dump Truck, Dump Loc, Rit, Tonnase
-        
-        # Heuristic for shifted columns:
-        # If 'Tonnase' is missing but we have 'Unnamed: X', it might be there.
-        # But let's look for numeric columns at the end.
-        
-        # Rename common variations
+            
+        # Standardize other columns (fuzzy match)
         col_map = {}
         for c in df.columns:
             cl = c.lower()
             if 'excavator' in cl: col_map[c] = 'Excavator'
-            elif 'commodity' in cl or 'commudity' in cl: col_map[c] = 'Commudity'
-            elif 'tonnase' in cl or 'tonase' in cl: col_map[c] = 'Tonnase'
+            elif 'commodity' in cl or 'commudity' in cl or 'komoditas' in cl: col_map[c] = 'Commudity'
+            elif 'tonnase' in cl or 'tonase' in cl or 'ton' in cl: col_map[c] = 'Tonnase'
             elif 'rit' in cl: col_map[c] = 'Rit'
             elif 'dump truck' in cl or 'dt' == cl: col_map[c] = 'Dump Truck'
+            elif 'blok' in cl: col_map[c] = 'BLOK'
+            elif 'front' in cl: col_map[c] = 'Front'
             
         df = df.rename(columns=col_map)
         
-        # Filter only valid excavators (PC prefix)
-        if 'Excavator' in df.columns:
-            df = df[df['Excavator'].astype(str).str.startswith('PC', na=False)]
-            # Normalize excavator names
-            df = normalize_excavator_column(df)
-        st.write(f"DEBUG: After Excavator Filter. Shape: {df.shape}")
-        
-        # Convert numeric columns
-        if 'Rit' in df.columns:
-            df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce').fillna(0)
-        else:
-            df['Rit'] = 0
-            
+        # Ensure Tonnase is numeric
         if 'Tonnase' in df.columns:
             df['Tonnase'] = pd.to_numeric(df['Tonnase'], errors='coerce').fillna(0)
-        else:
-            df['Tonnase'] = 0
-        
-        # Final cleanup
-        df = df[df['Tonnase'] > 0]
-        st.write(f"DEBUG: After Tonnase Filter. Shape: {df.shape}")
+            # Remove 0 rows (optional, but good for charts)
+            df = df[df['Tonnase'] > 0]
             
-        df = df.reset_index(drop=True)
-        
-        # Format Date for Display (Remove 00:00:00)
-        # KEEP AS DATETIME for filtering first!
-        # The formatting to remove 00:00:00 should happen only at current view level OR we ensure it's string.
-        # But apply_global_filters expects datetime.
-        # FIX: We keep it as datetime. The user complained about 00:00:00 VISUALLY in the table.
-        # We can handle visual formatting in the view (dataframe.style or convert to string AFTER filtering).
-        # But here we are in loader. Let's convert to formatted string for now, 
-        # BUT apply_global_filters needs to be smart enough to handle strings or we convert back.
-        
-        # ACTUALLY: dashboard view calls apply_global_filters immediately after load.
-        # apply_global_filters expects datetime.
-        # So we MUST return datetime from here.
-        
-        # WORKAROUND: We return datetime here. We will fix the VISUAL display in views/produksi.py instead.
-        # Reverting the .dt.date change that broke the filter.
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-
-        
-        # Drop columns after Tonnase (Unnamed nonsense)
-        # Keep only standard columns
-        keep_cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 
-                     'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
-        
-        # Add any missing standard columns as empty
-        for col in keep_cols:
-            if col not in df.columns:
-                df[col] = ''
-                
-        # Select only kept columns
-        df = df[[c for c in keep_cols if c in df.columns]]
-        
+        # Ensure Rit is numeric
+        if 'Rit' in df.columns:
+            df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce').fillna(0)
+            
+        # Normalize Excavator names
+        if 'Excavator' in df.columns:
+            df = normalize_excavator_column(df)
+            
         return df
-        
+
     except Exception as e:
-        print(f"Error processing production: {e}")
-        return pd.DataFrame()
+        # If post-processing fails, return what we have (better than nothing)
+        return df
 
 
 # ============================================================
