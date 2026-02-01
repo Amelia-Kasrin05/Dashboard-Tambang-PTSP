@@ -1993,15 +1993,20 @@ def load_shipping_data():
     elif os.path.exists(r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring.xlsx"):
         path = r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring.xlsx"
     # 3. Try Local Cache
+    # 3. Try Local Cache
     else:
         local_path = load_from_local("monitoring")
         if local_path: path = local_path
+    
+    source = path
+    if not source and ONEDRIVE_LINKS.get("monitoring"):
+         source = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
 
-    if not path:
+    if not source:
         return pd.DataFrame()
 
     try:
-        xls = pd.ExcelFile(path)
+        xls = pd.ExcelFile(source)
         
         # Fuzzy Match Sheet Name
         sheet_name = None
@@ -2016,7 +2021,8 @@ def load_shipping_data():
 
         # Read Header Row (Row 2 in specific file, Index 2)
         # But let's read a chunk to be safe
-        df_raw = pd.read_excel(path, sheet_name=sheet_name, header=None, nrows=5)
+        if hasattr(source, 'seek'): source.seek(0)
+        df_raw = pd.read_excel(source, sheet_name=sheet_name, header=None, nrows=5)
         
         # Find Header Row Index (Looking for 'Tanggal' and 'Shift')
         header_idx = -1
@@ -2029,7 +2035,8 @@ def load_shipping_data():
         if header_idx == -1: return pd.DataFrame() # Header not found
 
         # Read Full Data with correct header
-        df_full = pd.read_excel(path, sheet_name=sheet_name, header=header_idx)
+        if hasattr(source, 'seek'): source.seek(0)
+        df_full = pd.read_excel(source, sheet_name=sheet_name, header=header_idx)
         
         # IDENTIFY BLOCKS
         # Pattern: [Tanggal, Shift, ..., Total LS, Total SS] repeated
@@ -2042,7 +2049,8 @@ def load_shipping_data():
         # Easier: Iterate by index
         
         # Reload without header to map indices accurately
-        df_nheader = pd.read_excel(path, sheet_name=sheet_name, header=None, skiprows=header_idx)
+        if hasattr(source, 'seek'): source.seek(0)
+        df_nheader = pd.read_excel(source, sheet_name=sheet_name, header=None, skiprows=header_idx)
         # Row 0 is now the header
         header_row = df_nheader.iloc[0]
         
