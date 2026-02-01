@@ -268,6 +268,7 @@ def normalize_excavator_column(df):
 @st.cache_data(ttl=CACHE_TTL)
 def load_produksi():
     """Load data produksi - FIXED for Excel serial dates"""
+    st.write("DEBUG: 🚀 Entering load_produksi() function")
     
     df = None
     
@@ -367,16 +368,31 @@ def load_produksi():
 
     # 1. Try Local First (Faster)
     local_path = load_from_local("produksi")
+    st.write(f"DEBUG: Local Path Check Result: {local_path}")
+    
     if local_path:
+        st.write("DEBUG: Attempting to load from LOCAL...")
         df = load_content(local_path)
+        st.write(f"DEBUG: Local Load Result (df is None?): {df is None}")
 
     # 2. Try OneDrive if Local failed (Cloud/Deployment)
-    if df is None and ONEDRIVE_LINKS.get("produksi"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"])
-        if file_buffer:
-            df = load_content(file_buffer)
+    if df is None:
+        st.write("DEBUG: Local failed/empty. Checking OneDrive Config...")
+        link_prod = ONEDRIVE_LINKS.get("produksi")
+        st.write(f"DEBUG: OneDrive Link Configured: {link_prod}")
+        
+        if link_prod:
+            st.write("DEBUG: Attempting to DOWNLOAD from OneDrive...")
+            file_buffer = download_from_onedrive(link_prod)
+            st.write(f"DEBUG: Download Result Buffer Size: {len(file_buffer.getvalue()) if file_buffer else 'None'}")
+            
+            if file_buffer:
+                st.write("DEBUG: Attempting to Parse Downloaded Buffer...")
+                df = load_content(file_buffer)
+                st.write(f"DEBUG: OneDrive Parse Result (df is None?): {df is None}")
     
     if df is None:
+        st.error("❌ FINAL ERROR: df is still None after all attempts.")
         return pd.DataFrame()
     
 
