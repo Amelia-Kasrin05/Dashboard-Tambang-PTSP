@@ -200,7 +200,8 @@ def render_sidebar():
             ("⚙️", "Stockpile & Pengolahan"),
             ("🚨", "Analisa Kendala"),
             ("🚢", "Pengiriman & Logistik"),
-            ("📋", "Rencana Harian")
+            ("📋", "Rencana Harian"),
+            ("🔌", "Debug Connection")
         ]
         
         for icon, menu in menus:
