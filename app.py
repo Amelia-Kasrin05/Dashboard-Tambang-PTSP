@@ -54,16 +54,25 @@ def show_debug_page():
                     
                     if r.status_code == 200:
                         st.success("Download Successful!")
-                        if len(r.content) > 1000:
-                            try:
-                                from io import BytesIO
-                                df_check = pd.read_excel(BytesIO(r.content))
+                        try:
+                            from io import BytesIO
+                            xls = pd.ExcelFile(BytesIO(r.content))
+                            st.write("**Available Sheets:**")
+                            st.json(xls.sheet_names)
+                            
+                            # Try to find target sheet
+                            target_sheet = next((s for s in xls.sheet_names if '2026' in str(s)), None)
+                            if target_sheet:
+                                st.write(f"✅ Found Target Sheet: `{target_sheet}`. Previewing:")
+                                df_check = pd.read_excel(xls, sheet_name=target_sheet)
                                 st.dataframe(df_check.head())
-                            except Exception as e:
-                                st.error(f"Excel Parse Error: {e}")
-                        else:
-                            st.warning("File too small, possibly an error HTML page?")
-                            st.code(r.text[:500])
+                            else:
+                                st.warning("❌ No '2026' sheet found! Previewing first sheet:")
+                                df_check = pd.read_excel(xls, sheet_name=0)
+                                st.dataframe(df_check.head())
+                                
+                        except Exception as e:
+                            st.error(f"Excel Parse Error: {e}")
                     else:
                         st.error("Download Failed")
                 except Exception as e:

@@ -31,5 +31,5 @@ def check_sheets(link):
         print(f"Error: {e}", flush=True)
 
 if __name__ == "__main__":
-    link = "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDvrAVlr7kFSrpX8-QHXuOnAd7QThWBm_Q2N5J7gzjuLSk?e=KRRRs1"
+    link = "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDvrAVlr7kFSrpX8-QHXuOnAd7QThWBm_Q2N5J7gzjuLSk?e=s0KJKk"
     check_sheets(link)
