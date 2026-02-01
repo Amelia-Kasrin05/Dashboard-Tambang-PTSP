@@ -37,7 +37,7 @@ def inject_css():
 }
 
 /* Hide default streamlit elements */
-#MainMenu, footer, header {visibility: hidden;}
+#MainMenu, footer {visibility: hidden;}
 .block-container {padding: 1rem 2rem 2rem 2rem !important; max-width: 100% !important;}
 
 /* ===== SIDEBAR ===== */
@@ -408,6 +408,69 @@ div[data-testid="stVerticalBlock"][style*="border"]:hover {
 /* Ensure Charts are visible on top of this background */
 div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"] {
     background: transparent !important;
+}
+
+/* ===== MOBILE RESPONSIVENESS (MAX-WIDTH: 640px) ===== */
+@media only screen and (max-width: 640px) {
+    /* 1. Reduce Global Padding */
+    .block-container {
+        padding: 1rem 0.5rem 2rem 0.5rem !important; /* Much tighter padding */
+    }
+    
+    /* 2. Page Header Stacking */
+    .page-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 1rem;
+        gap: 0.5rem;
+    }
+    .page-header-icon {
+        margin: 0 auto; /* Center icon */
+    }
+    .page-header-text h1 {
+        font-size: 1.5rem !important; /* Smaller Title */
+    }
+    
+    /* 3. KPI Grid - Single Column or 2-up */
+    .kpi-grid {
+        grid-template-columns: repeat(2, 1fr) !important; /* Force 2 columns on mobile */
+        gap: 0.5rem !important;
+    }
+    .kpi-card {
+        padding: 0.75rem !important;
+        min-height: auto !important;
+    }
+    .kpi-value {
+        font-size: 1.25rem !important; /* Smaller value text */
+    }
+    .kpi-icon {
+        font-size: 1.25rem !important;
+    }
+    .kpi-label {
+        font-size: 0.65rem !important;
+    }
+    
+    /* 4. Chart Containers */
+    .chart-container {
+        padding: 0.75rem !important;
+    }
+    .chart-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    /* 5. Hide auxiliary elements if needed */
+    .section-divider {
+        margin: 1.5rem 0 1rem 0;
+    }
+
+    /* 6. Tabs Scrollable */
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 0.5rem;
+    }
 }
 </style>
 """, unsafe_allow_html=True)

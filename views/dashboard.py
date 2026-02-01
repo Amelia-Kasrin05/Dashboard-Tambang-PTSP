@@ -133,7 +133,7 @@ def show_dashboard():
     # 3. DISPLAY KPI CARDS
     # ----------------------------------------
     st.markdown(f"""
-    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
+    <div class="kpi-grid">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">⛏️</div>
             <div class="kpi-label">Total Produksi</div>
