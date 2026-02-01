@@ -290,15 +290,13 @@ def load_produksi():
         
         if target_sheets:
             sheets_to_process = target_sheets
+            st.write(f"DEBUG: Found Target Sheets: {sheets_to_process}")
         else:
-            # If no 2026 sheet found, do NOT load anything (or fallback to empty list if strict)
-            # Current logic allowed fallback to 'not system sheets' - keeping that for safety 
-            # unless user wants STRICT 2026 ONLY. 
-            # User said "baca 2026 dan seterusnya".
-            # Let's keep the fallback for now but ensure 2026 is top priority.
             sheets_to_process = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
+            st.write(f"DEBUG: No Specific Target. Scanning: {sheets_to_process}")
             
         for sheet in sheets_to_process:
+            st.write(f"DEBUG: Processing Sheet: {sheet}")
             # Skip obviously non-data sheets
             if sheet.lower() in ['menu', 'dashboard', 'summary', 'ref', 'config']:
                 continue
@@ -320,7 +318,10 @@ def load_produksi():
                 if 'Date' in temp_df.columns:
                         # Basic validation
                         valid_dfs.append(temp_df)
+                        st.write(f"DEBUG: Sheet '{sheet}' Accepted ✅")
                         continue # Success, move to next sheet
+                else:
+                    st.write(f"DEBUG: Sheet '{sheet}' Rejected ❌. Columns: {temp_df.columns.tolist()}")
             
             # --- LEGACY SCANNER LOGIC (Maintained for older sheets) ---
             # Smart Header Detection: Read first 30 rows
