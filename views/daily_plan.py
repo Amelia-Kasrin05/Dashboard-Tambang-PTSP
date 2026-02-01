@@ -387,180 +387,256 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         
         # Check vs other boxes
         for b in boxes:
-            pad = 10 
+            pad = 40  # Increased to 40 for better separation (prevent overlapping)
             if (abs(cx - b['x']) * 2 < (BOX_W + b['w'] + pad) and 
                 abs(cy - b['y']) * 2 < (BOX_H + b['h'] + pad)):
                 return True
         return False
 
-    final_placements = []
-
+    # GROUPING BY TARGET LOCATION (Aligned Stacking)
+    # ----------------------------------------------
+    grouped_annotations = {}
     for ann in annotations:
-        t_x, t_y = ann['x'], ann['y']
+        key = (ann['x'], ann['y'])
+        if key not in grouped_annotations:
+            grouped_annotations[key] = []
+        grouped_annotations[key].append(ann)
+    
+    final_placements = []
+    
+    # Sort groups by Y (top to bottom) then X for consistent placement order
+    sorted_keys = sorted(grouped_annotations.keys(), key=lambda k: (-k[1], k[0]))
+    
+    for key in sorted_keys:
+        group_anns = grouped_annotations[key]
+        item_count = len(group_anns)
         
-        # Spiral Radii - start small, go big
-        radii = [130, 160, 200, 250, 320, 400]
+        t_x, t_y = key
         
-        # Determine logical center of usable area for biasing
+        # Calculate "Mega Box" dimensions (Vertical Stack)
+        STACK_PAD = 5  # Reduced gap for tighter stacking
+        total_h = item_count * BOX_H + (item_count - 1) * STACK_PAD
+        
+        # Spiral Radii - Expanded to find more space
+        radii = [130, 160, 200, 250, 320, 400, 500, 600, 700]
+        
+        # Determine logical center
         usable_center_x = (USABLE_MIN_X + USABLE_MAX_X) / 2
         
-        # Angles
-        # If target is left of center, prefer searching Left/Top/Bottom
-        if t_x < usable_center_x:
-            # Prefers Left (180)
-            angles = [180, 150, 210, 120, 240, 90, 270, 0] 
-        else:
-            # Prefers Right (0) - but confined by legend
+        # Angles Logic
+        # User requested Priority: LEFT.
+        # Only go Right if we are heavily constrained on the Left (e.g. near left border).
+        
+        if t_x < 200: 
+            # Too close to left border, forced to go Right
             angles = [0, 30, 330, 60, 300, 90, 270, 180]
+        else:
+             # Default: Priority Left (180), then varies
+            angles = [180, 150, 210, 120, 240, 90, 270, 0]
             
         full_angles = angles
         
-        # Specific overrides
-        if ann.get('loc_id') == 'SP3': full_angles = [180, 150, 210] 
-        if ann.get('loc_id') == 'N8': full_angles = [180, 150, 210] 
+        # Check overrides (use first item's loc_id)
+        first_ann = group_anns[0]
+        loc_id = first_ann.get('loc_id')
+        
+        if loc_id == 'SP3': full_angles = [180, 150, 210] 
+        if loc_id == 'N8': full_angles = [60, 120, 90]   # N8 Bottom/Side (Avoid 90 to prevent line overlap)
+        if loc_id == 'E5': full_angles = [180, 150, 210] # E5 Left
+        if loc_id == 'D6': full_angles = [0, 30, 330]    # D6 Right 
+        if loc_id == 'K3': full_angles = [180, 150, 210] # K3 Left 
+        if loc_id == 'M10': full_angles = [0, 30, 330]   # M10 Right (Requested)
         
         best_x, best_y = t_x, t_y
         found = False
         import math
         
+        # Search placement for the MEGA BOX
         for r in radii:
             for angle_deg in full_angles:
                 angle_rad = math.radians(angle_deg)
                 c_x = t_x + r * math.cos(angle_rad)
                 c_y = t_y + r * math.sin(angle_rad)
                 
-                if not check_collision(c_x, c_y, placed_boxes):
+                # Check collision for MEGA BOX
+                collision = False
+                
+                # Usable Area Check
+                margin_w = BOX_W/2 + 10
+                margin_h_total = total_h/2 + 10
+                
+                if c_x < USABLE_MIN_X + margin_w or c_x > USABLE_MAX_X - margin_w: collision = True
+                if c_y < USABLE_MIN_Y + margin_h_total or c_y > USABLE_MAX_Y - margin_h_total: collision = True
+                
+                if not collision:
+                    for b in placed_boxes:
+                        pad = 50 # Reduced to 50 for tighter packing (was 70)
+                        
+                        dist_x = abs(c_x - b['x']) * 2
+                        dist_y = abs(c_y - b['y']) * 2
+                        sum_w = BOX_W + b['w'] + pad
+                        sum_h = total_h + b['h'] + pad
+                        
+                        if dist_x < sum_w and dist_y < sum_h:
+                            collision = True
+                            break
+                
+                if not collision:
                     best_x, best_y = c_x, c_y
                     found = True
                     break
             if found: break
         
-        # Fallback: Push inwards to usable area
+        # Fallback
         if not found:
-            # Just try to clamp target + some offset
-            # Push towards center
             dir_to_center = 1 if t_x < usable_center_x else -1
+            dir_y = 0
+            
+            # OVERRIDE FALLBACK DIRECTIONS
+            if loc_id == 'K3': dir_to_center = -0.75 # Increased from -0.5 to ensure space for Line Trunk
+            if loc_id == 'E5': dir_to_center = -1
+            if loc_id == 'D6': dir_to_center = 1
+            if loc_id == 'M10': dir_to_center = 1
+            if loc_id == 'N8': 
+                dir_to_center = 0.2 # Slight right
+                dir_y = 1 # Force Down
+            
             best_x = t_x + (dir_to_center * 150)
-            best_y = t_y
-        
-        # STRICT FINAL CLAMP TO USABLE AREA
-        margin_w = BOX_W/2 + 5
-        margin_h = BOX_H/2 + 5
-        best_x = safe_clamp(best_x, USABLE_MIN_X + margin_w, USABLE_MAX_X - margin_w)
-        best_y = safe_clamp(best_y, USABLE_MIN_Y + margin_h, USABLE_MAX_Y - margin_h)
-        
-        placed_boxes.append({'x': best_x, 'y': best_y, 'w': BOX_W, 'h': BOX_H})
-        final_placements.append({
-            'ann': ann,
-            'x': best_x,
-            'y': best_y,
-            'tx': t_x,
-            'ty': t_y
-        })
+            best_y = t_y + (dir_y * 100) # Apply Y offset
+            
+            # Safe Clamp
+            margin_w = BOX_W/2 + 5
+            margin_h_total = total_h/2 + 5
+            min_x_constraint = USABLE_MIN_X
+            if loc_id == 'K3': min_x_constraint = 5 # Relax constraint further
+            
+            best_x = safe_clamp(best_x, min_x_constraint + margin_w, USABLE_MAX_X - margin_w)
+            best_y = safe_clamp(best_y, USABLE_MIN_Y + margin_h_total, USABLE_MAX_Y - margin_h_total)
 
-    # SMART L-SHAPE ROUTER
-    # --------------------
-    # Prioritizes simple 1-turn lines for maximum aesthetics ("Technical look").
-    # Hybrid logic: Vertical First (Flagpole) vs Horizontal First (Shelf).
+        # Register MEGA BOX to collision list
+        placed_boxes.append({'x': best_x, 'y': best_y, 'w': BOX_W, 'h': total_h})
+        
+        # UNPACK Individual Boxes
+        start_y = best_y + (total_h / 2) - (BOX_H / 2)
+        
+        for i, ann in enumerate(group_anns):
+            item_y = start_y - i * (BOX_H + STACK_PAD)
+            final_placements.append({
+                'ann': ann,
+                'x': best_x,
+                'y': item_y,
+                'tx': t_x,
+                'ty': t_y,
+                'is_grouped': len(group_anns) > 1,
+                'group_role': 'top' if i == 0 else 'member', # Tag role if needed
+                'group_x': best_x # Shared axis
+            })
+
+    # MANIFOLD / BUS ROUTER
+    # -----------------------
+    # Matches user preference: Target -> Horizontal Trunk -> Vertical Bus -> Horizontal Branches -> Boxes
+    # The Bus is offset from the boxes to create a clear "forking" visual.
     
+    # Identify Stacks
+    stacks = {} # Key: x_coord -> [placements]
     for p in final_placements:
-        ann = p['ann']
-        l_x, l_y = p['x'], p['y']
-        t_x, t_y = p['tx'], p['ty']
+        k = p['x']
+        if k not in stacks: stacks[k] = []
+        stacks[k].append(p)
         
-        visual_box_w = 110
-        visual_box_h = 70 
+    visual_box_w = 110
+    visual_box_h = 70
         
-        # Define Box Bounds
-        box_left = l_x - visual_box_w/2
-        box_right = l_x + visual_box_w/2
-        box_top = l_y + visual_box_h/2 # Plotly Y is up? Need to verify. 
-        # Assuming our coordinates: Y increases upwards.
-        # box_top is higher Y value.
-        box_bottom = l_y - visual_box_h/2
+    for stack_x, items in stacks.items():
+        if not items: continue
         
-        path_svg = ""
+        first = items[0]
+        tx, ty = first['tx'], first['ty']
         
-        # LOGIC:
-        # Check if Target X is "inside" the Box's X-shadow (column).
-        # If Target is horizontally aligned with box -> Must go SIDEWAYS first (Horizontal First).
-        # Else (Target is clearly Left/Right of box) -> Go VERTICAL first (Flagpole).
+        # Determine Box Anchor X (Side of box facing target)
+        # And Bus X (The vertical line position)
+        BUS_OFFSET = 20 # Distance from box side to vertical bus
+        MIN_TRUNK = 15  # Minimum length of trunk from dot
         
-        is_target_in_x_shadow = (t_x >= box_left - 10) and (t_x <= box_right + 10)
+        if stack_x > tx: # Stack is Right of Target
+            anchor_x = stack_x - visual_box_w/2 # Box Left Side
+            bus_x = anchor_x - BUS_OFFSET       # Bus is to the Left of Box
+            
+            # Enforce Minimum Trunk Length
+            if bus_x < tx + MIN_TRUNK:
+                bus_x = tx + MIN_TRUNK
+            
+        else: # Stack is Left of Target
+            anchor_x = stack_x + visual_box_w/2 # Box Right Side
+            bus_x = anchor_x + BUS_OFFSET       # Bus is to the Right of Box
+            
+            # Enforce Minimum Trunk Length (to the Left)
+            if bus_x > tx - MIN_TRUNK:
+                bus_x = tx - MIN_TRUNK
+            
+        # Draw Lines
+        is_multi = len(items) > 1
         
-        if not is_target_in_x_shadow:
-            # FLAGPOLE STYLE (Vertical, then Horizontal)
-            # 1. Start at Target
-            # 2. Go Up/Down to Box Y-Level (use box side anchor)
-            # 3. Turn Horizontal to Box Side
+        # Determine Vertical Extent of Bus
+        y_coords = [p['y'] for p in items]
+        
+        # If SINGLE item, we still want the "Manifold" look if requested, 
+        # or simplified? User image shows multi-branch.
+        # Even for single item, T -> Bus -> Box looks "Technical".
+        # Let's use the same logic for consistency.
+        
+        # Bus Top/Bottom should cover all branches + maybe connect to Trunk.
+        # Trunk connects at Target Y level.
+        
+        min_y = min(y_coords + [ty])
+        max_y = max(y_coords + [ty])
+        
+        # Actually, Bus should go from min(BranchYs) to max(BranchYs)?
+        # And Trunk connects to Bus at ty?
+        # Yes.
+        
+        # But if ty is outside the range of branches, the bus needs to extend to ty.
+        # So Bus Range = [min(ys + [ty]), max(ys + [ty])]
+        
+        bus_top = max(y_coords + [ty])
+        bus_bottom = min(y_coords + [ty])
+        
+        # 1. TRUNK: Target -> Bus (Horizontal)
+        path_trunk = f"M {tx},{ty} L {bus_x},{ty}"
+        
+        # 2. BUS: Vertical Line
+        path_bus = f"M {bus_x},{bus_top} L {bus_x},{bus_bottom}"
+        
+        # 3. BRANCHES: Bus -> Box Anchor (Horizontal) (For each item)
+        path_branches = ""
+        for p in items:
+            iy = p['y']
+            path_branches += f" M {bus_x},{iy} L {anchor_x},{iy}"
             
-            # Determine connect side
-            if l_x > t_x: # Box is Right
-                anchor_x = box_left
-            else: # Box is Left
-                anchor_x = box_right
-            
-            # Corner Point
-            corner_x = t_x
-            corner_y = l_y
-            
-            # Draw: T(tx,ty) -> C(tx,ly) -> A(anchor_x,ly)
-            path_svg = f"M {t_x},{t_y} L {t_x},{l_y} L {anchor_x},{l_y}"
-            
-        else:
-            # SHELF STYLE (Horizontal, then Vertical)
-            # Target is directly above/below box. Vertical line would cut through box.
-            # So: Go Sideways out of target, then Up/Down to Box Side.
-            # Or: Go Up/Down to Box Top/Bottom?
-            
-            # Let's try "Snap to Top/Bottom"
-            is_target_above = t_y > l_y
-            
-            if is_target_above: # Target Above
-                # Connect to Box Top
-                anchor_y = box_top + 5
-                # Path: T(tx,ty) -> (tx, anchor_y). Straight Vertical Line.
-                # Simple and clean.
-                path_svg = f"M {t_x},{t_y} L {t_x},{anchor_y}"
-            else: # Target Below
-                # Connect to Box Bottom
-                anchor_y = box_bottom - 5
-                path_svg = f"M {t_x},{t_y} L {t_x},{anchor_y}"
-                
-        # 1. Elbow Line
+        full_path = path_trunk + " " + path_bus + " " + path_branches
+        
+        # Draw Shape
         fig.add_shape(
-            type="path",
-            path=path_svg,
-            line=dict(color=ann['color'], width=2),
-            layer="above" 
+            type="path", path=full_path,
+            line=dict(color=first['ann']['color'], width=2), layer="above"
         )
-        
-        # 2. Box Annotation
-        fig.add_annotation(
-            x=l_x,
-            y=l_y, 
-            text=ann['text'],
-            showarrow=False, 
-            bgcolor=ann['color'], 
-            bordercolor='white',
-            borderwidth=1,
-            borderpad=4,
-            font=dict(size=9, color='black', family='Arial, sans-serif'), 
-            opacity=0.9, 
-            align='center',
-            captureevents=True,
-            width=visual_box_w
-        )
-        
-        # 3. Target Dot
+
+        # Draw Boxes & Dots
+        for p in items:
+            ann = p['ann']
+            fig.add_annotation(
+                x=p['x'], y=p['y'], text=ann['text'],
+                showarrow=False, bgcolor=ann['color'], 
+                bordercolor='white', borderwidth=1, borderpad=4,
+                font=dict(size=9, color='black', family='Arial, sans-serif'), 
+                opacity=0.9, width=visual_box_w
+            )
+            
+        # Target Dot
         fig.add_trace(go.Scatter(
-            x=[t_x],
-            y=[t_y],
-            mode='markers',
-            marker=dict(size=12, color=ann['color'], line=dict(color='white', width=2)),
-            hoverinfo='text',
-            hovertext=ann['loc_id'],
-            showlegend=False
+            x=[tx], y=[ty], mode='markers',
+            marker=dict(size=12, color=items[0]['ann']['color'], line=dict(color='white', width=2)),
+            showlegend=False, hoverinfo='skip'
         ))
     
     # Configure layout
