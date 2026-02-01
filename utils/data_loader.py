@@ -393,6 +393,7 @@ def load_produksi():
         
         # Cleanup Column Names
         df.columns = [str(c).strip() for c in df.columns]
+        st.write(f"DEBUG: Loaded Raw. Shape: {df.shape}")
         
         # Standardize Date Column
         col_date = next((c for c in df.columns if 'Date' in c or 'Tanggal' in c), 'Date')
@@ -405,12 +406,14 @@ def load_produksi():
             # Catch "Shift 1", "1", "Shift 2", "2", etc.
             valid_shifts = ['Shift 1', 'Shift 2', 'Shift 3', '1', '2', '3']
             df = df[df['Shift'].isin(valid_shifts)]
+        st.write(f"DEBUG: After Shift Filter. Shape: {df.shape}")
         
         # ✅ FIX: Parse Excel Serial Date
         df['Date'] = safe_parse_date_column(df['Date'])
         
         # Remove invalid dates
         df = df[df['Date'].notna()]
+        st.write(f"DEBUG: After Date Filter. Shape: {df.shape}")
         
         # Parse Time
         if 'Time' in df.columns:
@@ -448,6 +451,7 @@ def load_produksi():
             df = df[df['Excavator'].astype(str).str.startswith('PC', na=False)]
             # Normalize excavator names
             df = normalize_excavator_column(df)
+        st.write(f"DEBUG: After Excavator Filter. Shape: {df.shape}")
         
         # Convert numeric columns
         if 'Rit' in df.columns:
@@ -462,6 +466,7 @@ def load_produksi():
         
         # Final cleanup
         df = df[df['Tonnase'] > 0]
+        st.write(f"DEBUG: After Tonnase Filter. Shape: {df.shape}")
             
         df = df.reset_index(drop=True)
         
