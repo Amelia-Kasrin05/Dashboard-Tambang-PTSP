@@ -25,81 +25,9 @@ from views import (
     # show_monitoring # Deprecated
 )
 
-# Debug Helper
-import requests
-import pandas as pd
-from config.settings import ONEDRIVE_LINKS
-from utils.data_loader import convert_onedrive_link, download_from_onedrive
 
-def show_debug_page():
-    st.title("🔌 Connection Debugger")
-    
-    st.info("Halaman ini untuk mengecek status koneksi ke OneDrive.")
-    
-    for key, link in ONEDRIVE_LINKS.items():
-        if not link:
-            continue
-            
-        with st.expander(f"Test Link: {key.upper()}", expanded=True):
-            st.code(link)
-            direct_url = convert_onedrive_link(link)
-            st.write(f"**Converted URL:** `{direct_url}`")
-            
-            if st.button(f"Test Download {key}", key=f"btn_{key}"):
-                try:
-                    r = requests.get(direct_url, timeout=10)
-                    st.write(f"Status Code: `{r.status_code}`")
-                    st.write(f"Content Type: `{r.headers.get('Content-Type')}`")
-                    st.write(f"Size: `{len(r.content)} bytes`")
-                    
-                    if r.status_code == 200:
-                        st.success("Download Successful!")
-                        try:
-                            from io import BytesIO
-                            xls = pd.ExcelFile(BytesIO(r.content))
-                            st.write("**Available Sheets:**")
-                            st.json(xls.sheet_names)
-                            
-                            # Try to find target sheet
-                            target_sheet = next((s for s in xls.sheet_names if '2026' in str(s)), None)
-                            if target_sheet:
-                                st.write(f"✅ Found Target Sheet: `{target_sheet}`. Previewing:")
-                                df_check = pd.read_excel(xls, sheet_name=target_sheet)
-                                st.dataframe(df_check.head())
-                            else:
-                                st.warning("❌ No '2026' sheet found! Previewing first sheet:")
-                                df_check = pd.read_excel(xls, sheet_name=0)
-                                st.dataframe(df_check.head())
-                                
-                        except Exception as e:
-                            st.error(f"Excel Parse Error: {e}")
-                    else:
-                        st.error("Download Failed")
-                except Exception as e:
-                    st.error(f"Exception: {e}")
-            
-    st.markdown("---")
-    st.subheader("🔍 Internal Loader Test")
-    st.info("Bagian ini mengecek apakah fungsi `load_produksi()` berhasil memproses data.")
-    
-    if st.button("Test load_produksi() Pipeline"):
-        try:
-            from utils.data_loader import load_produksi
-            st.cache_data.clear() # Force clear cache for test
-            df_pipeline = load_produksi()
-            
-            st.write(f"**Shape:** {df_pipeline.shape}")
-            if not df_pipeline.empty:
-                st.success("✅ Pipeline Result Non-Empty!")
-                st.write("**Columns:**", df_pipeline.columns.tolist())
-                st.write("**First 5 Rows:**")
-                st.dataframe(df_pipeline.head())
-                st.write("**Data Types:**")
-                st.write(df_pipeline.dtypes)
-            else:
-                st.error("❌ Pipeline Result is EMPTY!")
-        except Exception as e:
-            st.error(f"Pipeline Error: {e}")
+
+
 # Placeholder imports for new modules (create files next)
 try:
     from views.process import show_process
@@ -153,8 +81,6 @@ def main():
             show_shipping()
         elif menu == "Rencana Harian" or menu == "Daily Plan":
             show_daily_plan()
-        elif menu == "Debug Connection":
-            show_debug_page()
         else:
             show_dashboard()
 
