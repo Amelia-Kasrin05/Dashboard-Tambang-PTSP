@@ -77,6 +77,29 @@ def show_debug_page():
                         st.error("Download Failed")
                 except Exception as e:
                     st.error(f"Exception: {e}")
+            
+    st.markdown("---")
+    st.subheader("🔍 Internal Loader Test")
+    st.info("Bagian ini mengecek apakah fungsi `load_produksi()` berhasil memproses data.")
+    
+    if st.button("Test load_produksi() Pipeline"):
+        try:
+            from utils.data_loader import load_produksi
+            st.cache_data.clear() # Force clear cache for test
+            df_pipeline = load_produksi()
+            
+            st.write(f"**Shape:** {df_pipeline.shape}")
+            if not df_pipeline.empty:
+                st.success("✅ Pipeline Result Non-Empty!")
+                st.write("**Columns:**", df_pipeline.columns.tolist())
+                st.write("**First 5 Rows:**")
+                st.dataframe(df_pipeline.head())
+                st.write("**Data Types:**")
+                st.write(df_pipeline.dtypes)
+            else:
+                st.error("❌ Pipeline Result is EMPTY!")
+        except Exception as e:
+            st.error(f"Pipeline Error: {e}")
 # Placeholder imports for new modules (create files next)
 try:
     from views.process import show_process
