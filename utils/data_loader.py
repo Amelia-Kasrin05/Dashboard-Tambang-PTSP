@@ -101,6 +101,18 @@ def convert_onedrive_link(share_link):
     
     share_link = share_link.strip()
     
+    # STRATEGY 1: Simple 'download=1' param replacement
+    # Works for modern 1drv.ms/x/c/ links
+    if "1drv.ms" in share_link or "onedrive.live.com" in share_link:
+        try:
+            # Remove existing query params (everything after ?)
+            base_link = share_link.split('?')[0]
+            # Add download=1
+            return f"{base_link}?download=1"
+        except:
+            pass
+
+    # STRATEGY 2: Legacy API (u! encoding)
     try:
         encoded = base64.b64encode(share_link.encode()).decode()
         encoded = encoded.rstrip('=').replace('/', '_').replace('+', '-')
