@@ -22,6 +22,32 @@ GANGGUAN_EXCEL_PATH = str(ONEDRIVE_PATH / "Gangguan_Produksi.xlsx")
 MONITORING_EXCEL_PATH = os.getenv("MONITORING_FILE", DEFAULT_EXCEL_PATH)
 PRODUKSI_FILE = os.getenv("PRODUKSI_FILE", PRODUKSI_EXCEL_PATH)
 GANGGUAN_FILE = os.getenv("GANGGUAN_FILE", GANGGUAN_EXCEL_PATH)
+
+# ============================================================
+# ONEDRIVE CONFIGURATION (PUBLIC LINKS)
+# ============================================================
+# Paste your OneDrive Share Links here.
+# Format: "https://1drv.ms/x/s!Am..."
+# NOTE: Ensure the link permission is set to "Anyone with the link" (Public)
+ONEDRIVE_LINKS = {
+    "produksi": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQAPusaXTuXzSY5zczqnC8kQAfjIsk5HoW2DUkcXrx8rA0k?e=5f4YTI",        # Produksi
+    "gangguan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCYC0kc9LmtQLaWebT-BykIAeJQWWZpWyTzqDjNvdsSiIk?e=wH6son",        # Gangguan
+    "monitoring": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQBwKzPpyWEAQJXt68FF5X01Afja8myfAwYlE_0FTgkjUtI?e=HuRDiH",      # Monitoring
+    "daily_plan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDqDDN8gyy4TI4Eac8mUlLTAXRVV5_jwYl1sj0iQs9rwRo?e=O6N0T0",      # Daily Plan
+    "shipping": "",   # Paste Link for Shipping.xlsx
+    "stockpile": ""   # Paste Link for Stockpile.xlsx
+}
+
+# Try to load from Streamlit Secrets if available (prioritized for Cloud)
+try:
+    import streamlit as st
+    if hasattr(st, "secrets") and "onedrive" in st.secrets:
+        for key in ONEDRIVE_LINKS.keys():
+            if key in st.secrets["onedrive"]:
+                ONEDRIVE_LINKS[key] = st.secrets["onedrive"][key]
+except:
+    pass
+
 CACHE_TTL = 300
 
 def get_monitoring_path():

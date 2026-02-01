@@ -347,17 +347,16 @@ def load_produksi():
         return None
 
 
-    # 1. Try OneDrive
-    if ONEDRIVE_LINKS.get("produksi"):
+    # 1. Try Local First (Faster)
+    local_path = load_from_local("produksi")
+    if local_path:
+        df = load_content(local_path)
+
+    # 2. Try OneDrive if Local failed (Cloud/Deployment)
+    if df is None and ONEDRIVE_LINKS.get("produksi"):
         file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"])
         if file_buffer:
             df = load_content(file_buffer)
-    
-    # 2. Try Local if OneDrive failed
-    if df is None:
-        local_path = load_from_local("produksi")
-        if local_path:
-            df = load_content(local_path)
     
     if df is None:
         return pd.DataFrame()
@@ -540,17 +539,26 @@ def load_gangguan_all():
     Prioritizes 2026 data sheets (e.g., 'Monitoring Jan 2026').
     """
     file_path = None
+    file_buffer = None
     
-    # Try local OneDrive folder first
+    # 1. Try Local First
     local_path = load_from_local("gangguan")
     if local_path:
         file_path = local_path
+        
+    # 2. Try OneDrive if Local failed
+    if file_path is None and ONEDRIVE_LINKS.get("gangguan"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
     
-    if file_path is None:
+    if file_path is None and file_buffer is None:
         return pd.DataFrame()
     
     try:
-        xls = pd.ExcelFile(file_path)
+        if file_path:
+            xls = pd.ExcelFile(file_path)
+        else:
+            xls = pd.ExcelFile(file_buffer)
+            
         sheet_names = xls.sheet_names
         
         # 0. User Override: Check for 'All' sheet first (Primary)
@@ -587,7 +595,11 @@ def load_gangguan_all():
         for sheet in target_sheets:
             try:
                 # Read sheet - Assume Row 0 is header
-                df_sheet = pd.read_excel(file_path, sheet_name=sheet)
+                if file_path:
+                    df_sheet = pd.read_excel(file_path, sheet_name=sheet)
+                else:
+                    # Reset buffer position if reused (though Pandas usually handles bytes well)
+                    df_sheet = pd.read_excel(file_buffer, sheet_name=sheet)
                 
                 if df_sheet.empty:
                     continue
@@ -1113,19 +1125,20 @@ def load_daily_plan():
     """Load data daily plan scheduling"""
     df = None
     
-    if ONEDRIVE_LINKS.get("daily_plan"):
+    # 1. Try Local First
+    local_path = load_from_local("daily_plan")
+    if local_path:
+        try:
+            df = pd.read_excel(local_path, sheet_name='Scheduling', skiprows=1)
+        except:
+            pass
+            
+    # 2. Try OneDrive if Local failed
+    if df is None and ONEDRIVE_LINKS.get("daily_plan"):
         file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
         if file_buffer:
             try:
                 df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
-            except:
-                pass
-    
-    if df is None:
-        local_path = load_from_local("daily_plan")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='Scheduling', skiprows=1)
             except:
                 pass
     
