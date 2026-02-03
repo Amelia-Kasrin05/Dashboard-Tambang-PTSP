@@ -34,6 +34,10 @@ def show_process():
         st.info("Pastikan sheet 'Stockpile Hopper' memiliki kolom: Date, Time, Shift, Dumping, Ritase, Rit.")
         return
 
+    # Info Timestamp Debug
+    last_update = st.session_state.get('last_update_stockpile', '-')
+    st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
+
     # 2. FILTER DATA (Date & Shift)
     df_filtered = apply_global_filters(df_hopper, date_col='Tanggal')
 

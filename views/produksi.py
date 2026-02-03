@@ -53,9 +53,28 @@ def show_produksi():
     # 1. LOAD & FILTER DATA
     # ----------------------------------------
     with st.spinner("Loading Production Data..."):
-        df_prod = load_produksi()
-        df_prod = apply_global_filters(df_prod)
+        df_prod_raw = load_produksi() # Keep raw copy
         
+        # Timestamp Info
+        last_update = st.session_state.get('last_update_produksi', '-')
+        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
+        
+        # Feedback for Force Sync
+        if st.session_state.get('force_cloud_reload', False):
+            if not df_prod_raw.empty:
+                 st.toast("✅ Cloud Data Linked!", icon="☁️")
+            else:
+                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
+        
+        df_prod = apply_global_filters(df_prod_raw) # Apply to main df
+        
+        # Explicitly filter invalid Tonnase (was previously done in loader)
+        # This allows us to track how many rows are dropped in Debug
+        if 'Tonnase' in df_prod.columns:
+             df_prod = df_prod[df_prod['Tonnase'] > 0]
+        
+    # -----------------------------------------------------
+
     if df_prod.empty:
         st.warning("⚠️ Data produksi tidak tersedia atau kosong setelah difilter.")
         return
@@ -331,7 +350,10 @@ def show_produksi():
     # ----------------------------------------
     st.markdown("### 📋 Detail Data Produksi")
     with st.expander("Lihat Tabel Lengkap", expanded=False):
-        df_display = df_prod.copy()
+        # USE RAW FILTERED DATA (Includes 0 Tonnase)
+        df_display = apply_global_filters(df_prod_raw).copy()
+        
+        # Sort desc
         df_display = df_display.iloc[::-1]
         
         if 'Date' in df_display.columns:
@@ -346,7 +368,7 @@ def show_produksi():
         # Excel Download (Sort Ascending = Oldest Data First)
         # MATCHING TABLE COLUMNS EXACTLY
         # 1. Sort raw data first
-        df_sorted = df_prod.sort_values(by=['Date', 'TimeStr'], ascending=True) if 'TimeStr' in df_prod.columns else df_prod.sort_values(by='Date', ascending=True)
+        df_sorted = apply_global_filters(df_prod_raw).sort_values(by=['Date', 'Time'], ascending=True) if 'Time' in df_prod_raw.columns else apply_global_filters(df_prod_raw).sort_values(by='Date', ascending=True)
         
         # 2. Format Date to match table string format
         if 'Date' in df_sorted.columns:

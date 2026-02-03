@@ -54,22 +54,23 @@ def render_sidebar():
             else:
                 status_class = "status-err"
             status_html += f'<div class="status-item"><span class="status-name">{name}</span><span class="status-value {status_class}">{stat}</span></div>'
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Refresh", use_container_width=True):
-                st.cache_data.clear()
-                st.cache_resource.clear()
-                st.success("Cache Cleared!")
-                import time
-                time.sleep(1)
-                st.rerun()
-        with col2:
-            try:
-                from datetime import datetime
-                current_time = datetime.now().strftime("%H:%M")
-            except:
-                current_time = "--:--"
-            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Updated: {current_time}</p>', unsafe_allow_html=True)
+            
+        # Unified Sync Button (Professional Single-Click Action)
+        if st.button("🔄 Sync & Refresh Data", use_container_width=True, type="primary", help="Ambil data terbaru dari OneDrive dan perbarui tampilan"):
+            st.session_state.force_cloud_reload = True
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.toast("Syncing data from Cloud...", icon="☁️")
+            import time
+            time.sleep(1) # Give it a moment to clear
+            st.rerun()
+            
+        try:
+            from datetime import datetime
+            current_time = datetime.now().strftime("%H:%M")
+        except:
+            current_time = "--:--"
+        st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Last Update: {current_time}</p>', unsafe_allow_html=True)
         
         st.markdown("---")
         

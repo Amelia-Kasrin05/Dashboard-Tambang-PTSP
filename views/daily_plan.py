@@ -26,11 +26,8 @@ try:
 except ImportError:
     CACHE_TTL = 300
 
-# Import data loader as fallback
-try:
-    from utils.data_loader import load_daily_plan as load_daily_plan_fallback
-except ImportError:
-    def load_daily_plan_fallback(): return pd.DataFrame()
+# Import data loader
+from utils.data_loader import load_daily_plan
 
 # File paths
 ONEDRIVE_FILE = r"C:\Users\user\OneDrive\Dashboard_Tambang\DAILY_PLAN.xlsx"
@@ -46,123 +43,9 @@ except ImportError:
 # DATA LOADER
 # ============================================================
 
-@st.cache_data(ttl=5)  # Reduced TTL to force frequent reload
+# Redundant local loader removed - using centralized loader
 def load_daily_plan_data():
-    """Load daily plan data from OneDrive Excel file"""
-    df = None
-    
-    # Try to read directly from OneDrive file first
-    try:
-        if os.path.exists(ONEDRIVE_FILE):
-            # Read with header=2 (row 3 contains the actual headers)
-            # CRITICAL FIX: Skip first column (column 0) which is empty/row numbers
-            # Read all columns EXCEPT the first one to prevent column misalignment
-            df = pd.read_excel(ONEDRIVE_FILE, sheet_name='Scheduling', header=2, usecols=lambda x: x != 'Unnamed: 0')
-
-            
-    except PermissionError:
-        st.warning("⚠️ File Excel sedang dibuka. Silakan tutup Excel dan refresh halaman.")
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error membaca file: {e}")
-        # Try fallback
-        df = load_daily_plan_fallback()
-    
-    if df is None or df.empty:
-        # Try fallback
-        df = load_daily_plan_fallback()
-        if df is not None and not df.empty:
-            # Standardize column names from fallback
-            col_mapping = {
-                'Batu Kapur': 'Batu Kapur',
-                'Alat Muat': 'Alat Muat',
-                'Alat Angkut': 'Alat Angkut'
-            }
-            df = df.rename(columns=col_mapping)
-    
-    if df is None or df.empty:
-        return pd.DataFrame()
-    
-    try:
-        # Indonesian day names mapping
-        day_names_id = {
-            0: 'Senin',    # Monday
-            1: 'Selasa',   # Tuesday
-            2: 'Rabu',     # Wednesday
-            3: 'Kamis',    # Thursday
-            4: 'Jumat',    # Friday
-            5: 'Sabtu',    # Saturday
-            6: 'Minggu'    # Sunday
-        }
-        
-        # Parse dates first (needed for Hari conversion)
-        if 'Tanggal' in df.columns:
-            df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-        
-        # Fix Hari column - handle both string day names and datetime values
-        if 'Hari' in df.columns:
-            def convert_hari(val, tanggal_val=None):
-                """Convert Hari value to proper day name"""
-                if pd.isna(val):
-                    # If Hari is empty, derive from Tanggal
-                    if pd.notna(tanggal_val):
-                        try:
-                            return day_names_id[pd.to_datetime(tanggal_val).dayofweek]
-                        except:
-                            return ''
-                    return ''
-                
-                val_str = str(val).strip()
-                
-                # Check if it's already a valid day name
-                if val_str in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']:
-                    return val_str
-                
-                # Check if it looks like a datetime (contains date pattern)
-                if '-' in val_str and len(val_str) > 8:
-                    try:
-                        dt = pd.to_datetime(val_str)
-                        return day_names_id[dt.dayofweek]
-                    except:
-                        pass
-                
-                # Return cleaned value
-                return val_str
-            
-            # Apply conversion with Tanggal as fallback
-            if 'Tanggal' in df.columns:
-                df['Hari'] = df.apply(lambda row: convert_hari(row['Hari'], row['Tanggal']), axis=1)
-            else:
-                df['Hari'] = df['Hari'].apply(convert_hari)
-        
-        # Keep Shift as is (clean string)
-        if 'Shift' in df.columns:
-            df['Shift'] = df['Shift'].astype(str).str.strip()
-            # Remove rows where Shift is 'nan' or empty
-            df = df[df['Shift'].notna() & (df['Shift'] != 'nan') & (df['Shift'] != '')]
-        
-        # Filter valid rows (has date or equipment or grid)
-        valid_cols = ['Tanggal', 'Grid', 'Alat Muat', 'Blok']
-        mask = pd.Series(False, index=df.index)
-        for col in valid_cols:
-            if col in df.columns:
-                mask = mask | df[col].notna()
-        df = df[mask]
-        
-        # Remove header rows that got included
-        if 'Hari' in df.columns:
-            df = df[df['Hari'] != 'Hari']
-        if 'Shift' in df.columns:
-            df = df[df['Shift'] != 'Shift']
-        
-        # Reset index
-        df = df.reset_index(drop=True)
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"Error processing Daily Plan: {e}")
-        return pd.DataFrame()
+    return load_daily_plan()
 
 
 
@@ -216,14 +99,30 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     )
     
     # ------------------------------------------------------------
-    # 1. FILTERING DATA
-    # ------------------------------------------------------------
-    if df_filtered.empty:
-        return fig
+    # 1. LOAD DATA
+    # ----------------------------------------
+    with st.spinner("Loading Daily Plan..."):
+        df_plan = load_daily_plan()
+        
+        # Timestamp Info
+        last_update = st.session_state.get('last_update_daily_plan', '-')
+        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
 
-    # Filter rules:
-    # - Must have: Tanggal, Shift, Alat Muat, Alat Angkut, ROM
-    # - Must have Grid OR Blok
+        # --- DEBUG SECTION ---
+        if 'debug_log_daily_plan' in st.session_state and st.session_state['debug_log_daily_plan']:
+            with st.expander("🛠️ DEBUG DATA INFO (Klik untuk analisa)"):
+                st.warning("⚠️ Jika data tidak muncul, kirimkan pesan di bawah ini ke tim developer:")
+                st.code(st.session_state['debug_log_daily_plan'])
+                
+                # Show raw data head if available
+                if not df_plan.empty:
+                    st.divider()
+                    st.write(f"Total Data (Dari OneDrive): {len(df_plan)}")
+                    st.write("5 Baris Teratas:", df_plan.head())
+        # ---------------------
+        
+        if df_plan.empty:
+            return fig
     mask = (
         df_filtered['Tanggal'].notna() &
         df_filtered['Shift'].notna() & df_filtered['Shift'].astype(str).str.strip().ne('') &
@@ -771,6 +670,32 @@ def create_data_table(df_filtered):
     # Format Tanggal if present
     if 'Tanggal' in display_df.columns:
         display_df['Tanggal'] = pd.to_datetime(display_df['Tanggal'], errors='coerce').dt.strftime('%Y-%m-%d')
+        
+    # Format Hari (Fix for datetime appearing as 2026-01-26)
+    if 'Hari' in display_df.columns:
+        day_map = {0: 'Senin', 1: 'Selasa', 2: 'Rabu', 3: 'Kamis', 4: 'Jumat', 5: 'Sabtu', 6: 'Minggu'}
+        def fix_hari(val):
+            # If it's a timestamp/datetime, convert to day name
+            if isinstance(val, (pd.Timestamp, datetime)):
+                # Ensure it's a pandas Timestamp for .dayofweek, or use .weekday() for python datetime
+                # safer to just convert to pandas timestamp
+                try:
+                    ts = pd.Timestamp(val)
+                    return day_map.get(ts.dayofweek, '')
+                except:
+                    return ''
+            
+            # If it's a string looking like a date (YYYY-MM-DD...)
+            s = str(val)
+            if '202' in s and '-' in s: 
+                try:
+                    dt = pd.to_datetime(s)
+                    return day_map.get(dt.dayofweek, s)
+                except:
+                    return s
+            return s
+            
+        display_df['Hari'] = display_df['Hari'].apply(fix_hari)
     
     # Format numerical columns
     for col in ['Batu Kapur', 'Silika', 'Clay']:
@@ -791,11 +716,42 @@ def show_daily_plan():
     """Render Daily Plan Dashboard with professional multi-select filters"""
     
     # Load data
+    # Load data
     df = load_daily_plan_data()
     
     if df.empty:
         st.warning("⚠️ Data Rencana Harian tidak tersedia. Pastikan file Excel ditutup.")
+        # Show debug log if empty
+        if 'debug_log_daily_plan' in st.session_state and st.session_state['debug_log_daily_plan']:
+             with st.expander("🛠️ DEBUG DATA INFO (Klik untuk analisa)"):
+                 st.code(st.session_state['debug_log_daily_plan'])
         return
+
+    # Ensure Tanggal is datetime
+    if 'Tanggal' in df.columns:
+        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+
+    # ============================================================
+    # HEADER (Already rendered above, skipping re-render if not needed)
+    
+    # ... (skipping existing header code lines 700-741 as they are just comments/HTML) ...
+    # Wait, replace_file_content replaces the chunk. I must include context carefully.
+    
+    # I will target lines 693 to 752 (start of available_dates).
+    # But 705-737 is a huge HTML block. I should avoid replacing it if possible.
+    # I will replace the top part (loading) and the line 752 separately?
+    # No, I can insert the conversion right after loading.
+
+    # Let's do a smaller replacement around line 693.
+
+    # 1. Inspect lines near 693.
+    # 693: df = load_daily_plan_data()
+    # 694: 
+    # 695: if df.empty:
+    # ...
+    
+    # I will replace lines 693-698.
+
     
     # ============================================================
     # HEADER

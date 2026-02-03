@@ -11,6 +11,7 @@ import base64
 import os
 import sys
 from datetime import datetime, timedelta
+import time
 
 from datetime import datetime, timedelta
 
@@ -94,12 +95,16 @@ def apply_global_filters(df, date_col='Date', shift_col='Shift'):
     return df
 
 
-def convert_onedrive_link(share_link):
+def convert_onedrive_link(share_link, cache_bust=False):
     """Convert OneDrive share link ke direct download link"""
     if not share_link or share_link.strip() == "":
         return None
     
     share_link = share_link.strip()
+    
+    # Determine separator
+    # For Strategy 1, we manually added ?download=1, so next is &
+    # For Strategy 2, it might be ?
     
     # STRATEGY 1: Simple 'download=1' param replacement
     # Works for modern 1drv.ms/x/c/ links
@@ -107,8 +112,11 @@ def convert_onedrive_link(share_link):
         try:
             # Remove existing query params (everything after ?)
             base_link = share_link.split('?')[0]
-            # Add download=1
-            return f"{base_link}?download=1"
+            
+            final_link = f"{base_link}?download=1"
+            if cache_bust:
+                final_link += f"&t={int(time.time())}"
+            return final_link
         except:
             pass
 
@@ -116,14 +124,18 @@ def convert_onedrive_link(share_link):
     try:
         encoded = base64.b64encode(share_link.encode()).decode()
         encoded = encoded.rstrip('=').replace('/', '_').replace('+', '-')
-        return f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
+        
+        final_link = f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
+        if cache_bust:
+             final_link += f"?t={int(time.time())}"
+        return final_link
     except Exception:
         return None
 
 
-def download_from_onedrive(share_link, timeout=30):
+def download_from_onedrive(share_link, timeout=30, cache_bust=False):
     """Download file dari OneDrive"""
-    direct_url = convert_onedrive_link(share_link)
+    direct_url = convert_onedrive_link(share_link, cache_bust=cache_bust)
     
     if not direct_url:
         return None
@@ -135,8 +147,13 @@ def download_from_onedrive(share_link, timeout=30):
         response = requests.get(direct_url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return BytesIO(response.content)
-    except:
+    except Exception as e:
+        if cache_bust: # Propagate error if this is a manual sync
+            raise e
         return None
+
+
+
 
 
 def load_from_local(file_key):
@@ -166,21 +183,12 @@ def check_onedrive_status():
             try:
                 file_buffer = download_from_onedrive(link, timeout=10)
                 if file_buffer:
-                    status[name] = "✅ OneDrive"
+                    status[name] = "✅ Cloud (Online)"
                     continue
             except:
                 pass
         
-        local_path = load_from_local(name)
-        if local_path:
-            try:
-                file_size = os.path.getsize(local_path)
-                size_kb = file_size // 1024
-                status[name] = f"✅ Local ({size_kb}KB)"
-            except Exception:
-                status[name] = "⚠️ Local (error)"
-        else:
-            status[name] = "⚠️ No link" if not (link and link.strip()) else "❌ Not found"
+        status[name] = "❌ Cloud (Error/Offline)"
     
     return status
 
@@ -267,8 +275,9 @@ def normalize_excavator_column(df):
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_produksi():
-    """Load data produksi - FIXED & ROBUST for OneDrive"""
+    """Load data produksi - FIXED & ROBUST with Header Scanning"""
     df = None
+    debug_log = []
     
     # Generic loader
     def load_content(source):
@@ -279,25 +288,60 @@ def load_produksi():
             # STRATEGY: Aggressively find '2026' sheets
             target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
             
-            # Fallback: if no 2026, take non-system sheets
+            # Fallback
             if not target_sheets:
                 target_sheets = [s for s in xls.sheet_names if s.lower() not in ['menu', 'dashboard', 'summary', 'ref', 'config']]
             
+            debug_log.append(f"Target Sheets: {target_sheets}")
+            
             for sheet in target_sheets:
                 try:
-                    # Read sheet
-                    temp_df = pd.read_excel(xls, sheet_name=sheet)
+                    # SMART HEADER SCANNING (Enhanced)
+                    # 1. Read chunk
+                    df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=100)
                     
-                    # 1. Clean Column Names
+                    header_idx = None
+                    found_signature = ""
+                    
+                    # Scan for signature columns (Flexible)
+                    for i in range(len(df_raw)):
+                        row_str = df_raw.iloc[i].astype(str).str.cat(sep=' ').lower()
+                        
+                        # Signature 1: Standard (Date + Shift + Front)
+                        if 'date' in row_str and 'shift' in row_str and 'front' in row_str:
+                            header_idx = i; found_signature = "Standard (Date+Shift+Front)"; break
+                        
+                        # Signature 2: Alternative (Tanggal + Shift)
+                        if 'tanggal' in row_str and 'shift' in row_str:
+                             header_idx = i; found_signature = "Indo (Tanggal+Shift)"; break
+                             
+                        # Signature 3: Minimal (Date + Dump Truck/Unit)
+                        if 'date' in row_str and ('dump truck' in row_str or 'unit' in row_str or 'dt' in row_str):
+                              header_idx = i; found_signature = "Minimal (Date+Unit)"; break
+                              
+                    if header_idx is None:
+                        # Fallback: Assume Row 0 if 'Date' or 'Tanggal' is there
+                        row0 = df_raw.iloc[0].astype(str).str.cat(sep=' ').lower()
+                        if 'date' in row0 or 'tanggal' in row0:
+                            header_idx = 0; found_signature = "Fallback Row 0"
+                        else:
+                            debug_log.append(f"Sheet '{sheet}': Header Scan Failed (No signatures found in first 100 rows)")
+                            continue
+
+                    debug_log.append(f"Sheet '{sheet}': Header found at Row {header_idx} ({found_signature})")
+                    
+                    # 2. Read full sheet with correct header
+                    temp_df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
+                    
+                    # Clean Column Names
                     temp_df.columns = [str(c).strip() for c in temp_df.columns]
                     
-                    # 2. Map Critical Columns (Date)
-                    # Find any column that looks like 'Date' or 'Tanggal'
+                    # Map Critical Columns (Date)
                     col_date = next((c for c in temp_df.columns if 'date' in c.lower() or 'tanggal' in c.lower()), None)
                     if col_date:
                         temp_df = temp_df.rename(columns={col_date: 'Date'})
                     
-                    # 3. Map Critical Columns (Shift)
+                    # Map Critical Columns (Shift)
                     col_shift = next((c for c in temp_df.columns if 'shift' in c.lower()), None)
                     if col_shift:
                         temp_df = temp_df.rename(columns={col_shift: 'Shift'})
@@ -305,44 +349,89 @@ def load_produksi():
                     # Standardize Date
                     if 'Date' in temp_df.columns:
                         temp_df['Date'] = safe_parse_date_column(temp_df['Date'])
+                        before_len = len(temp_df)
                         temp_df = temp_df.dropna(subset=['Date']) # Keep only valid dates
+                        after_len = len(temp_df)
+                        
+                        debug_log.append(f"Sheet '{sheet}': Parsed {after_len} valid rows (dropped {before_len - after_len})")
                         
                         # Add to list if we have data
                         if not temp_df.empty:
                             valid_dfs.append(temp_df)
+                    else:
+                        debug_log.append(f"Sheet '{sheet}': 'Date' column not found after mapping. Cols: {list(temp_df.columns)}")
                             
                 except Exception as e:
-                    continue # Skip bad sheets
+                    debug_log.append(f"Error reading sheet {sheet}: {str(e)}")
+                    continue 
             
             if valid_dfs:
                 return pd.concat(valid_dfs, ignore_index=True)
             return None
             
         except Exception as e:
+            debug_log.append(f"Error opening Excel file: {str(e)}")
             return None
 
-    # 1. Try Local
-    local_path = load_from_local("produksi")
-    if local_path:
-        df = load_content(local_path)
-
-    # 2. Try OneDrive
-    if df is None and ONEDRIVE_LINKS.get("produksi"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"])
-        if file_buffer:
-            df = load_content(file_buffer)
+    # 1. FORCE CLOUD SYNC CHECK
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        link = ONEDRIVE_LINKS.get("produksi")
+        if link:
+            try:
+                # ENABLE CACHE BUSTING HERE
+                debug_log.append(f"Attempting download. Link found: {link[:20]}...")
+                
+                # Manual trace of conversion
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL: {direct_url}")
+                
+                if not direct_url:
+                     debug_log.append("Error: convert_onedrive_link returned None")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                    df = load_content(file_buffer)
+                    if df is not None and not df.empty:
+                        st.session_state['last_update_produksi'] = datetime.now().strftime("%H:%M")
+                    else:
+                        debug_log.append("Sync failed: Content load returned empty dataframe")
+                else:
+                    debug_log.append("Download failed: No buffer returned (despite URL)")
+            except Exception as e:
+                debug_log.append(f"Cloud Sync Error Triggered: {str(e)}")
+        else:
+            debug_log.append("Error: Production Link is EMPTY in settings")
+    
+    # 2. Try OneDrive (Fallback)
+    if (df is None or df.empty) and ONEDRIVE_LINKS.get("produksi") and not force_sync:
+        try:
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"], cache_bust=False)
+            if file_buffer:
+                df = load_content(file_buffer)
+                if df is not None and not df.empty:
+                   st.session_state['last_update_produksi'] = datetime.now().strftime("%H:%M")
+                else:
+                    debug_log.append("Fallback Sync: Content load returned empty")
+            else:
+                debug_log.append("Fallback Sync: Download returned None (Silent Error)")
+        except Exception as e:
+             debug_log.append(f"Fallback Sync Error: {str(e)}")
+    
+    # SAVE DEBUG LOG TO SESSION STATE
+    st.session_state['debug_log_produksi'] = debug_log
     
     if df is None or df.empty:
         return pd.DataFrame() # Return empty if all fails
     
     # ---------------------------------------------------------
-    # POST-PROCESSING (Cleaning & normalization)
+    # POST-PROCESSING
     # ---------------------------------------------------------
     try:
         # Normalize Shift if exists
         if 'Shift' in df.columns:
             df['Shift'] = df['Shift'].astype(str).str.strip()
-            # Normalize specific values
             df['Shift'] = df['Shift'].replace({
                 '1': 'Shift 1', '2': 'Shift 2', '3': 'Shift 3',
                 '1.0': 'Shift 1', '2.0': 'Shift 2', '3.0': 'Shift 3'
@@ -362,32 +451,29 @@ def load_produksi():
             cl = c.lower()
             if 'excavator' in cl: col_map[c] = 'Excavator'
             elif 'commodity' in cl or 'commudity' in cl or 'komoditas' in cl: col_map[c] = 'Commudity'
+            elif 'unit' in cl or 'dump truck' in cl or 'dt' == cl: col_map[c] = 'Dump Truck'
+            elif 'ritase' in cl or 'rit' == cl: col_map[c] = 'Rit'
             elif 'tonnase' in cl or 'tonase' in cl or 'ton' in cl: col_map[c] = 'Tonnase'
-            elif 'rit' in cl: col_map[c] = 'Rit'
-            elif 'dump truck' in cl or 'dt' == cl: col_map[c] = 'Dump Truck'
             elif 'blok' in cl: col_map[c] = 'BLOK'
             elif 'front' in cl: col_map[c] = 'Front'
+            elif 'dump' in cl and 'loc' in cl: col_map[c] = 'Dump Loc'
             
         df = df.rename(columns=col_map)
         
-        # Ensure Tonnase is numeric
-        if 'Tonnase' in df.columns:
-            df['Tonnase'] = pd.to_numeric(df['Tonnase'], errors='coerce').fillna(0)
-            # Remove 0 rows (optional, but good for charts)
-            df = df[df['Tonnase'] > 0]
-            
-        # Ensure Rit is numeric
-        if 'Rit' in df.columns:
-            df['Rit'] = pd.to_numeric(df['Rit'], errors='coerce').fillna(0)
-            
+        # Numeric conversions
+        for col in ['Rit', 'Tonnase']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
         # Normalize Excavator names
         if 'Excavator' in df.columns:
             df = normalize_excavator_column(df)
             
         return df
-
+        
     except Exception as e:
-        # If post-processing fails, return what we have (better than nothing)
+        debug_log.append(f"Post-processing error: {str(e)}")
+        st.session_state['debug_log_produksi'] = debug_log # Update log
         return df
 
 
@@ -409,13 +495,13 @@ def load_gangguan(bulan):
             except:
                 pass
     
-    if df is None:
-        local_path = load_from_local("gangguan")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name=sheet, skiprows=1)
-            except:
-                pass
+    # if df is None:
+    #     local_path = load_from_local("gangguan")
+    #     if local_path:
+    #         try:
+    #             df = pd.read_excel(local_path, sheet_name=sheet, skiprows=1)
+    #         except:
+    #             pass
     
     if df is None:
         return pd.DataFrame()
@@ -437,22 +523,55 @@ def load_gangguan(bulan):
 
 
 @st.cache_data(ttl=CACHE_TTL)
-def load_gangguan_all():
+def load_gangguan_enhanced():
     """
-    Load data gangguan lengkap.
+    Load data gangguan lengkap (DEBUG MODE).
     Prioritizes 2026 data sheets (e.g., 'Monitoring Jan 2026').
     """
     file_path = None
     file_buffer = None
+    debug_log = []
     
-    # 1. Try Local First
-    local_path = load_from_local("gangguan")
-    if local_path:
-        file_path = local_path
+    # 0. Check Force Sync
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        # Force reload config to ensure latest link
+        import importlib
+        import config.settings
+        importlib.reload(config.settings)
+        # Use different name to avoid UnboundLocalError shadowing global ONEDRIVE_LINKS
+        from config.settings import ONEDRIVE_LINKS as RELOADED_LINKS
         
-    # 2. Try OneDrive if Local failed
-    if file_path is None and ONEDRIVE_LINKS.get("gangguan"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
+        link = RELOADED_LINKS.get("gangguan")
+        if link:
+            try:
+                # Log FULL link for verification
+                debug_log.append(f"🔗 Link Used: {link}")
+                
+                debug_log.append(f"Attempting download (Gangguan)...")
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL: {direct_url[:50]}...")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                     st.session_state['last_update_gangguan'] = datetime.now().strftime("%H:%M")
+                else:
+                     debug_log.append("Gangguan Sync failed: No buffer returned")
+            except Exception as e:
+                debug_log.append(f"Gangguan Sync Error: {str(e)}")
+    
+    # 1. Try OneDrive (Fallback)
+    if file_path is None and file_buffer is None and ONEDRIVE_LINKS.get("gangguan") and not force_sync:
+        try:
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
+            if file_buffer:
+                 st.session_state['last_update_gangguan'] = datetime.now().strftime("%H:%M")
+        except Exception as e:
+            debug_log.append(f"Gangguan Fallback Error: {str(e)}")
+            
+    # Save log
+    st.session_state['debug_log_gangguan'] = debug_log
     
     if file_path is None and file_buffer is None:
         return pd.DataFrame()
@@ -465,30 +584,46 @@ def load_gangguan_all():
             
         sheet_names = xls.sheet_names
         
-        # 0. User Override: Check for 'All' sheet first (Primary)
+        # 0. STRICT PRIORITY: 'All' sheet
+        # User explicitly requested to focus on 'All'
+        target_sheets = []
         if 'All' in sheet_names:
             target_sheets = ['All']
-            # print("Loading from sheet: All")
-        else:
-            # 1. Try to find 2026 sheets (Secondary)
-            target_sheets = [s for s in sheet_names if '2026' in str(s) and 'Monitoring' in str(s)]
+            debug_log.append("Gangguan Sync: Priority 'All' sheet selected.")
             
-            # 2. If no 2026 specific sheets, fallback to scanning
-            if not target_sheets:
-                # Fallback for 'Gangguan 2026', 'Data 2026', etc or generic 'Monitoring'
-                candidates = [s for s in sheet_names if 'monitoring' in str(s).lower()]
-                if candidates:
-                    target_sheets = candidates
-                else:
-                     # Last resort: 'Sheet1' or first sheet
-                     if 'Sheet1' in sheet_names:
-                         target_sheets = ['Sheet1']
-                     elif len(sheet_names) > 0:
-                         target_sheets = [sheet_names[0]]
-
+            # --- PASSIVE CHECK: WARN IF STALE ---
+            try:
+                mon_sheets = [s for s in sheet_names if 'monitoring' in str(s).lower()]
+                for ms in mon_sheets[:2]: # Check top 2 monitoring sheets
+                    if file_path: df_mon = pd.read_excel(file_path, sheet_name=ms)
+                    else: df_mon = pd.read_excel(file_buffer, sheet_name=ms)
+                    
+                    if 'Tanggal' in df_mon.columns:
+                        dates = pd.to_datetime(df_mon['Tanggal'], errors='coerce')
+                        if not dates.empty:
+                            mon_max = dates.max()
+                            debug_log.append(f"🔎 Check '{ms}': Max Date {mon_max}")
+            except: pass
+            # ------------------------------------
+            
+        else:
+            # Fallback only if 'All' is missing
+            # Fallback only if 'All' is missing
+            debug_log.append("Gangguan Sync: 'All' sheet not found. Searching for Monitoring 2026...")
+            mon_sheets = [s for s in sheet_names if 'monitoring' in str(s).lower()]
+            mon_sheets.sort(reverse=True)
+            if mon_sheets:
+                target_sheets = [mon_sheets[0]]
+            elif len(sheet_names) > 0:
+                target_sheets = [sheet_names[0]]
+                
         if not target_sheets:
+            debug_log.append(f"Gangguan Sync: No valid sheets found. Available: {sheet_names}")
+            st.session_state['debug_log_gangguan'] = debug_log
             return pd.DataFrame()
             
+        debug_log.append(f"Gangguan Sync: Final Selection -> {target_sheets}")
+        
         all_dfs = []
         standard_cols = ['Tanggal', 'Bulan', 'Tahun', 'Week', 'Shift', 'Start', 'End', 
                         'Durasi', 'Crusher', 'Alat', 'Remarks', 'Kelompok Masalah', 'Gangguan', 
@@ -502,11 +637,21 @@ def load_gangguan_all():
                 if file_path:
                     df_sheet = pd.read_excel(file_path, sheet_name=sheet)
                 else:
-                    # Reset buffer position if reused (though Pandas usually handles bytes well)
                     df_sheet = pd.read_excel(file_buffer, sheet_name=sheet)
                 
                 if df_sheet.empty:
+                    debug_log.append(f"Sheet '{sheet}' is empty. Skipping.")
                     continue
+                
+                # Log raw validation
+                debug_log.append(f"Sheet '{sheet}': Read {len(df_sheet)} rows.")
+                if 'Tanggal' in df_sheet.columns:
+                     try:
+                         # Quick check max date without modifying df yet
+                         dates = pd.to_datetime(df_sheet['Tanggal'], errors='coerce')
+                         debug_log.append(f"Sheet '{sheet}': Date Range {dates.min()} - {dates.max()}")
+                     except: 
+                         debug_log.append(f"Sheet '{sheet}': Could not parse dates for logging")
 
                 # Normalize columns
                 df_sheet.columns = [str(c).strip() for c in df_sheet.columns]
@@ -541,7 +686,7 @@ def load_gangguan_all():
                 all_dfs.append(df_sheet)
                 
             except Exception as e:
-                print(f"Error reading sheet {sheet}: {e}")
+                # print(f"Error reading sheet {sheet}: {e}")
                 continue
         
         if not all_dfs:
@@ -696,25 +841,49 @@ def get_gangguan_summary(df):
 def load_bbm_enhanced():
     """
     Load and transform BBM data to Long Format [Date, Unit, Category, Liters]
-    Handles dynamic date columns (1-31)
+    (DEBUG MODE ENABLED)
     """
     df = None
     sheet_name = 'BBM'
+    debug_log = []
     
-    # Try OneDrive then Local
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
+    # 0. Check Force Sync (Prioritize explicit reload)
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        link = ONEDRIVE_LINKS.get("monitoring")
+        if link:
             try:
-                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-            except: pass
+                debug_log.append(f"Attempting download (BBM). Link: {link[:20]}...")
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL (BBM): {direct_url}")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                    st.session_state['last_update_bbm'] = datetime.now().strftime("%H:%M")
+                    try:
+                        df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+                    except Exception as e:
+                        debug_log.append(f"BBM Excel Read Error: {str(e)}")
+                else:
+                    debug_log.append("BBM Sync failed: No buffer returned")
+            except Exception as e:
+                debug_log.append(f"BBM Cloud Sync Error: {str(e)}")
+
+    # 1. Standard Cloud Load (Fallback)
+    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring") and not force_sync:
+        try:
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+            if file_buffer:
+                st.session_state['last_update_bbm'] = datetime.now().strftime("%H:%M")
+                try:
+                    df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+                except: pass
+        except Exception as e:
+            debug_log.append(f"BBM Fallback Error: {str(e)}")
             
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name=sheet_name)
-            except: pass
+    # Save log
+    st.session_state['debug_log_bbm'] = debug_log
             
     if df is None or df.empty:
         return pd.DataFrame()
@@ -792,24 +961,49 @@ def load_bbm_enhanced():
 def load_ritase_enhanced():
     """
     Load and transform Ritase data to Long Format [Date, Shift, Location, Ritase]
+    (DEBUG MODE ENABLED)
     """
     df = None
     sheet_name = 'Ritase'
+    debug_log = []
     
-    # Try OneDrive then Local
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
+    # 0. Check Force Sync
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        link = ONEDRIVE_LINKS.get("monitoring")
+        if link:
             try:
-                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-            except: pass
+                debug_log.append(f"Attempting download (Ritase). Link: {link[:20]}...")
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL (Ritase): {direct_url}")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                    st.session_state['last_update_ritase'] = datetime.now().strftime("%H:%M")
+                    try:
+                        df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+                    except Exception as e:
+                        debug_log.append(f"Ritase Excel Read Error: {str(e)}")
+                else:
+                    debug_log.append("Ritase Sync failed: No buffer returned")
+            except Exception as e:
+                debug_log.append(f"Ritase Cloud Sync Error: {str(e)}")
+
+    # 1. Standard Cloud Load (Cloud Only)
+    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring") and not force_sync:
+        try:
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+            if file_buffer:
+                st.session_state['last_update_ritase'] = datetime.now().strftime("%H:%M")
+                try:
+                    df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+                except: pass
+        except Exception as e:
+            debug_log.append(f"Ritase Fallback Error: {str(e)}")
             
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name=sheet_name)
-            except: pass
+    # Save log
+    st.session_state['debug_log_ritase'] = debug_log
             
     if df is None or df.empty:
         return pd.DataFrame()
@@ -872,6 +1066,7 @@ def load_ritase_enhanced():
 # that might still reference the old names.
 load_bbm = load_bbm_enhanced
 load_ritase = load_ritase_enhanced
+load_gangguan_all = load_gangguan_enhanced
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan():
@@ -901,19 +1096,22 @@ def load_analisa_produksi_all():
     df = None
     sheet_name = 'Analisa Produksi'
     
-    # Try OneDrive then Local
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+    # 0. Check Force Sync
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync and ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"], cache_bust=True)
         if file_buffer:
             try:
                 df = pd.read_excel(file_buffer, sheet_name=sheet_name)
             except: pass
-            
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
+
+    # 1. Standard Cloud Load (Cloud Only)
+    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring"):
+        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        if file_buffer:
             try:
-                df = pd.read_excel(local_path, sheet_name=sheet_name)
+                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
             except: pass
             
     if df is None or df.empty:
@@ -988,13 +1186,13 @@ def load_ritase():
             except:
                 pass
     
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='Ritase')
-            except:
-                pass
+    # if df is None:
+    #     local_path = load_from_local("monitoring")
+    #     if local_path:
+    #         try:
+    #             df = pd.read_excel(local_path, sheet_name='Ritase')
+    #         except:
+    #             pass
     
     if df is None:
         return pd.DataFrame()
@@ -1026,25 +1224,49 @@ def load_ritase():
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_daily_plan():
-    """Load data daily plan scheduling"""
+    """
+    Load data daily plan scheduling (DEBUG MODE ENABLED)
+    """
     df = None
+    debug_log = []
     
-    # 1. Try Local First
-    local_path = load_from_local("daily_plan")
-    if local_path:
-        try:
-            df = pd.read_excel(local_path, sheet_name='Scheduling', skiprows=1)
-        except:
-            pass
-            
-    # 2. Try OneDrive if Local failed
-    if df is None and ONEDRIVE_LINKS.get("daily_plan"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
-        if file_buffer:
+    # 0. Check Force Sync (Prioritize explicit reload)
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        link = ONEDRIVE_LINKS.get("daily_plan")
+        if link:
             try:
-                df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
-            except:
-                pass
+                debug_log.append(f"Attempting download (Daily Plan). Link: {link[:20]}...")
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL (Daily Plan): {direct_url}")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                    st.session_state['last_update_daily_plan'] = datetime.now().strftime("%H:%M")
+                    try:
+                        df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
+                    except Exception as e:
+                        debug_log.append(f"Daily Plan Excel Read Error: {str(e)}")
+                else:
+                    debug_log.append("Daily Plan Sync failed: No buffer returned")
+            except Exception as e:
+                debug_log.append(f"Daily Plan Cloud Sync Error: {str(e)}")
+
+    # 1. Standard Cloud Load (Fallback)
+    if (df is None or df.empty) and ONEDRIVE_LINKS.get("daily_plan") and not force_sync:
+        try:
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
+            if file_buffer:
+                 st.session_state['last_update_daily_plan'] = datetime.now().strftime("%H:%M")
+                 try:
+                     df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
+                 except: pass
+        except Exception as e:
+            debug_log.append(f"Daily Plan Fallback Error: {str(e)}")
+            
+    # Save log
+    st.session_state['debug_log_daily_plan'] = debug_log
     
     if df is None:
         return pd.DataFrame()
@@ -1314,13 +1536,13 @@ def load_tonase():
             except:
                 pass
     
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='Tonase', header=1)
-            except:
-                pass
+    # if df is None:
+    #     local_path = load_from_local("monitoring")
+    #     if local_path:
+    #         try:
+    #             df = pd.read_excel(local_path, sheet_name='Tonase', header=1)
+    #         except:
+    #             pass
     
     if df is None:
         return pd.DataFrame()
@@ -1557,13 +1779,13 @@ def load_pengiriman():
             except:
                 pass
     
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='TONASE Pengiriman ')
-            except:
-                pass
+    # if df is None:
+    #     local_path = load_from_local("monitoring")
+    #     if local_path:
+    #         try:
+    #             df = pd.read_excel(local_path, sheet_name='TONASE Pengiriman ')
+    #         except:
+    #             pass
     
     if df is None:
         return pd.DataFrame()
@@ -1772,21 +1994,57 @@ def load_stockpile_hopper():
     """
     Load and process Stockpile Hopper data based on Transactional Structure.
     Scans for header row containing 'Date', 'Time', 'Shift', 'Dumping', 'Ritase', 'Rit'.
+    (DEBUG MODE ENABLED)
     """
     try:
         source = None
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            source = MONITORING_EXCEL_PATH
-        elif ONEDRIVE_LINKS.get("monitoring"):
-             source = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        else:
-             # Fallback local check
-             local_path = load_from_local("monitoring")
-             if local_path: source = local_path
+        df = None
+        debug_log = []
+        
+        # 1. FORCE CLOUD SYNC CHECK
+        force_sync = st.session_state.get('force_cloud_reload', False)
+        
+        if force_sync:
+            link = ONEDRIVE_LINKS.get("monitoring")
+            if link:
+                try:
+                    debug_log.append(f"Attempting download (Stockpile). Link: {link[:20]}...")
+                    direct_url = convert_onedrive_link(link, cache_bust=True)
+                    debug_log.append(f"Converted URL (Stockpile): {direct_url}")
+                    
+                    file_buffer = download_from_onedrive(link, cache_bust=True)
+                    if file_buffer:
+                        source = file_buffer
+                        # RECORD TIMESTAMP for Debugging
+                        st.session_state['last_update_stockpile'] = datetime.now().strftime("%H:%M:%S")
+                    else:
+                        debug_log.append("Stockpile Sync failed: No buffer returned")
+                except Exception as e:
+                    debug_log.append(f"Stockpile Cloud Sync Error: {e}")
+        
+        # 2. Standard Path Resolution (Cloud Only)
+        if not source:
+             link = ONEDRIVE_LINKS.get("monitoring")
+             if link:
+                 try:
+                     # Add tracing for fallback too if debug mode needed, but keep simple
+                     source = download_from_onedrive(link)
+                     if source:
+                         # Record timestamp for standard load too
+                         st.session_state['last_update_stockpile'] = datetime.now().strftime("%H:%M:%S")
+                 except Exception as e:
+                     debug_log.append(f"Stockpile Fallback Error: {e}")
+        
+        # Save log
+        st.session_state['debug_log_stockpile'] = debug_log
         
         if source:
             # 1. Read a chunk of rows to find the header (e.g., first 5000 rows)
             # User screenshot shows header at ~3400, so we need a deep scan.
+            # Handle source types (BytesIO vs FilePath)
+            if hasattr(source, 'seek'):
+                source.seek(0)
+                
             df_raw = pd.read_excel(source, sheet_name='Stockpile Hopper', header=None, nrows=5000)
             
             header_idx = None
@@ -1904,75 +2162,66 @@ def load_stockpile_hopper():
             return pd.DataFrame()
             
     except Exception as e:
+        # debug_log.append(f"Error loading Stockpile Hopper: {e}") # Scope issue if defined inside try? No, defined at top.
+        # But wait, debug_log is inside local scope? Yes.
         print(f"Error loading Stockpile Hopper: {e}")
         return pd.DataFrame()
     return pd.DataFrame()
 
 
+def load_raw_from_cloud(sheet_name, header=0):
+    """Helper to load raw sheet from Cloud (Monitoring.xlsx) - Cloud Only"""
+    if ONEDRIVE_LINKS.get("monitoring"):
+        try:
+            # Check Force Sync state to determine cache busting
+            force_sync = st.session_state.get('force_cloud_reload', False)
+            
+            # Download (with cache bust if forced)
+            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"], cache_bust=force_sync)
+            if file_buffer:
+                return pd.read_excel(file_buffer, sheet_name=sheet_name, header=header)
+        except Exception as e:
+            # print(f"Error loading raw cloud sheet {sheet_name}: {e}")
+            pass
+    return pd.DataFrame()
+
 @st.cache_data(ttl=CACHE_TTL)
 def load_bbm_raw():
-    """Load BBM sheet directly (Raw)"""
-    try:
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            return pd.read_excel(MONITORING_EXCEL_PATH, sheet_name='BBM')
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error loading BBM: {e}")
-        return pd.DataFrame()
+    """Load BBM sheet directly (Raw) - Cloud Only"""
+    return load_raw_from_cloud('BBM')
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_ritase_raw():
-    """Load Ritase sheet directly (Raw)"""
-    try:
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            return pd.read_excel(MONITORING_EXCEL_PATH, sheet_name='Ritase')
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error loading Ritase: {e}")
-        return pd.DataFrame()
+    """Load Ritase sheet directly (Raw) - Cloud Only"""
+    return load_raw_from_cloud('Ritase')
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_analisa_produksi_raw():
-    """Load Analisa Produksi sheet directly"""
-    try:
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            return pd.read_excel(MONITORING_EXCEL_PATH, sheet_name='Analisa Produksi')
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error loading Analisa: {e}")
-        return pd.DataFrame()
+    """Load Analisa Produksi sheet directly - Cloud Only"""
+    return load_raw_from_cloud('Analisa Produksi')
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan_raw():
-    """Load Gangguan sheet directly"""
-    try:
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            return pd.read_excel(MONITORING_EXCEL_PATH, sheet_name='Gangguan')
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error loading Gangguan: {e}")
-        return pd.DataFrame()
+    """Load Gangguan sheet directly - Cloud Only"""
+    return load_raw_from_cloud('Gangguan')
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_tonase_raw():
-    """Load Tonase sheet directly"""
+    """Load Tonase sheet directly - Cloud Only"""
     try:
-        if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-            df = pd.read_excel(MONITORING_EXCEL_PATH, sheet_name='Tonase', header=1)
+        df = load_raw_from_cloud('Tonase', header=1)
+        
+        # Safety: Rename first column to Tanggal if needed
+        if len(df.columns) > 0:
+            df = df.rename(columns={df.columns[0]: 'Tanggal'})
             
-            # Safety: Rename first column to Tanggal if needed
-            if len(df.columns) > 0:
-                df = df.rename(columns={df.columns[0]: 'Tanggal'})
-                
-            # Filter repeated headers
-            if 'Tanggal' in df.columns:
-                df = df[df['Tanggal'].astype(str).str.strip() != 'Tanggal']
-                df = df[df['Tanggal'].notna()]
-                
-            return df
-        return pd.DataFrame()
+        # Filter repeated headers
+        if 'Tanggal' in df.columns:
+            df = df[df['Tanggal'].astype(str).str.strip() != 'Tanggal']
+            df = df[df['Tanggal'].notna()]
+            
+        return df
     except Exception as e:
-        st.error(f"Error loading Tonase: {e}")
         return pd.DataFrame()
 
 
@@ -1981,26 +2230,50 @@ def load_shipping_data():
     """
     Load data pengiriman from 'TONASE PENGIRIMAN ' sheet.
     Enhanced to handle horizontal month blocks (Jan, Feb, etc. side-by-side).
+    (DEBUG MODE ENABLED)
     """
     df = None
+    debug_log = []
     
-    # Path Resolution
-    path = None
-    # 1. Try Config Path
-    if MONITORING_EXCEL_PATH and os.path.exists(MONITORING_EXCEL_PATH):
-        path = MONITORING_EXCEL_PATH
-    # 2. Try User Specific Path (Hardcoded override for this specific user request)
-    elif os.path.exists(r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring.xlsx"):
-        path = r"C:\Users\user\OneDrive\Dashboard_Tambang\Monitoring.xlsx"
-    # 3. Try Local Cache
-    # 3. Try Local Cache
+    # 0. CHECK FORCE SYNC
+    force_sync = st.session_state.get('force_cloud_reload', False)
+    
+    if force_sync:
+        link = ONEDRIVE_LINKS.get("monitoring")
+        if link:
+            try:
+                debug_log.append(f"Attempting download (Shipping). Link: {link[:20]}...")
+                direct_url = convert_onedrive_link(link, cache_bust=True)
+                debug_log.append(f"Converted URL (Shipping): {direct_url}")
+                
+                file_buffer = download_from_onedrive(link, cache_bust=True)
+                if file_buffer:
+                    source = file_buffer
+                    st.session_state['last_update_shipping'] = datetime.now().strftime("%H:%M")
+                else: 
+                     debug_log.append("Shipping Sync failed: No buffer returned")
+                     source = None
+            except Exception as e:
+                debug_log.append(f"Shipping Cloud Sync Error: {e}")
+                source = None
+        else:
+            source = None
     else:
-        local_path = load_from_local("monitoring")
-        if local_path: path = local_path
-    
-    source = path
-    if not source and ONEDRIVE_LINKS.get("monitoring"):
-         source = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+        source = None
+
+    # Standard Path Resolution (Cloud Only Mode)
+    if not source:
+        link = ONEDRIVE_LINKS.get("monitoring")
+        if link:
+             try:
+                 source = download_from_onedrive(link)
+                 if source:
+                     st.session_state['last_update_shipping'] = datetime.now().strftime("%H:%M")
+             except Exception as e:
+                 debug_log.append(f"Shipping Fallback Error: {e}")
+
+    # Save log
+    st.session_state['debug_log_shipping'] = debug_log
 
     if not source:
         return pd.DataFrame()

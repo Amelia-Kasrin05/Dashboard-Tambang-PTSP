@@ -18,8 +18,20 @@ def show_shipping():
     
     # 1. LOAD DATA
     with st.spinner("Memuat Data Pengiriman..."):
-        df = load_shipping_data()
-        df = apply_global_filters(df, date_col='Date')
+        df_shipping = load_shipping_data()
+        
+        # Timestamp Info
+        last_update = st.session_state.get('last_update_shipping', '-')
+        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
+
+        # Feedback for Force Sync
+        if st.session_state.get('force_cloud_reload', False):
+             if not df_shipping.empty:
+                 st.toast("✅ Cloud Data Linked!", icon="☁️")
+             else:
+                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
+        
+        df = apply_global_filters(df_shipping, date_col='Date')
         
     if df.empty:
         st.warning("⚠️ Data Pengiriman tidak tersedia.")

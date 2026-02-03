@@ -49,11 +49,24 @@ def show_gangguan():
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. LOAD DATA
-    with st.spinner("Loading Maintenance Data..."):
+    # 1. Load Data
+    # ----------------------------------------
+    with st.spinner("Memuat Data Gangguan..."):
         df_gangguan = load_gangguan_all()
+        
+        # Timestamp Info
+        last_update = st.session_state.get('last_update_gangguan', '-')
+        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
+        
         # Load Production to get Total Active Fleet Size (Professional Standard)
         df_prod = load_produksi()
+        
+        # Feedback for Force Sync
+        if st.session_state.get('force_cloud_reload', False):
+             if not df_gangguan.empty:
+                 st.toast("✅ Cloud Data Linked!", icon="☁️")
+             else:
+                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
         
         # Apply Global Filters
         df_gangguan = apply_global_filters(df_gangguan, date_col='Tanggal')

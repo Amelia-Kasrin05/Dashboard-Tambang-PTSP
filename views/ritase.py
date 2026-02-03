@@ -48,8 +48,31 @@ def show_ritase():
     # 1. LOAD DATA
     # ----------------------------------------
     with st.spinner("Loading Hauling Data..."):
-        df_prod = load_produksi()
-        df_prod = apply_global_filters(df_prod)
+        df_prod_raw = load_produksi() # Keep raw copy (Ritase uses production file)
+        
+        # Timestamp Info
+        last_update = st.session_state.get('last_update_produksi', '-')
+        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode - Production Source)")
+        
+        # Feedback for Force Sync
+        if df_prod_raw.empty:
+            st.warning("⚠️ Data produksi tidak tersedia (Kosong/Belum Sync). Silakan cek koneksi.")
+            # Show debug log if empty
+            if 'debug_log_produksi' in st.session_state and st.session_state['debug_log_produksi']:
+                 with st.expander("🛠️ Debug Info (Kenapa Data Kosong?)"):
+                     st.json(st.session_state['debug_log_produksi'])
+            return
+
+        # Feedback for Force Sync
+        if st.session_state.get('force_cloud_reload', False):
+             st.toast("✅ Data Updated from Cloud!", icon="☁️")
+        
+        df_prod = apply_global_filters(df_prod_raw)
+        
+        # Explicitly filter invalid Tonnase for CHARTS (Charts must remain clean)
+        # But we will keep df_prod_raw or create a display version for table later
+        if 'Tonnase' in df_prod.columns:
+             df_prod = df_prod[df_prod['Tonnase'] > 0]
         
     if df_prod.empty:
         st.warning("⚠️ Data produksi/ritase tidak tersedia untuk periode ini.")
@@ -307,8 +330,8 @@ def show_ritase():
     # ----------------------------------------
     st.markdown("### 📋 Log Ritase Detail")
     with st.expander("Lihat Data Tabel", expanded=True):
-        # Prepare Data for Display
-        display_df = df_prod.copy()
+        # Prepare Data for Display: USE RAW FILTERED DATA (Includes 0 Tonnase)
+        display_df = apply_global_filters(df_prod_raw).copy()
         
         # Format Date to String (YYYY-MM-DD)
         if 'Date' in display_df.columns:
@@ -323,24 +346,16 @@ def show_ritase():
         show_cols = [c for c in cols if c in display_df.columns]
         
         # LOGIC MATCHING PRODUKSI: Reverse Order (Last Excel Row -> First)
-        # Instead of sorting by Date/Time, we simply reverse the dataframe
-        # assuming Excel is chronological top-to-bottom.
         display_reversed = display_df.iloc[::-1]
         
         st.dataframe(display_reversed[show_cols], use_container_width=True)
         
         # Excel Download (Sort Ascending = Oldest Data First)
-        # 1. Sort by Date/Time (or rely on original df_ritase order if it was sorted)
-        # Since display_df came from df_ritase which might be sorted...
-        # Let's be explicit like in Produksi
-        
-        # We need the original unreversed data or just reverse the reversed one
-        df_download = display_reversed[show_cols].iloc[::-1]
+        # Sort using the potentially reversed or raw data
+        df_download = display_reversed[show_cols].iloc[::-1] if not display_reversed.empty else display_reversed
         
         # Better: Sort explicitly if possible
         if 'Date' in df_download.columns:
-             # It's already string formatted in line 315, so sorting might be string-based
-             # But YYYY-MM-DD sorts correctly as string.
              df_download = df_download.sort_values(by=['Date'], ascending=True)
 
         from utils.helpers import convert_df_to_excel
