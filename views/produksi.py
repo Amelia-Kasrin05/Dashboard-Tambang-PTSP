@@ -1,78 +1,53 @@
-# ============================================================
-# PRODUKSI - Professional Mining Production Dashboard
-# ============================================================
-# Industry-grade mining operations monitoring
-# Version 3.0 - Global Filters, Heatmap, and Download
-
 import streamlit as st
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import pandas as pd
 from datetime import datetime
-
-from config import CHART_SEQUENCE, DAILY_PRODUCTION_TARGET, DAILY_INTERNAL_TARGET
 from utils.data_loader import load_produksi, apply_global_filters
 from utils.helpers import get_chart_layout
 
+# ==========================================
+# CONFIGURATION
+# ==========================================
+DAILY_PRODUCTION_TARGET = 18000  # Default Target
+DAILY_INTERNAL_TARGET = 25000    # Internal Target
+
+# apply_global_filters is now imported from utils.data_loader
 
 def show_produksi():
-    """Professional Mining Production Dashboard"""
-    
-    # Page Header (Consistent with Ritase)
     st.markdown("""
-    <style>
-    /* FORCE OVERRIDE FOR CONTAINERS */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        /* VISIBLE CONTRAST CARD STYLE */
-        background: linear-gradient(145deg, #1c2e4a 0%, #16253b 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        border-radius: 16px !important;
-        padding: 1.25rem !important;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        border-color: rgba(255, 255, 255, 0.3) !important;
-        background: linear-gradient(145deg, #233554 0%, #1c2e4a 100%) !important;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 30px rgba(0,0,0,0.6) !important;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] > div {
-       pointer-events: auto; 
-    }
-    </style>
-
-    <div class="page-header">
-        <div class="page-header-icon">⛏️</div>
-        <div class="page-header-text">
-            <h1>Produksi Tambang</h1>
-            <p>Monitoring Produksi Harian, Kinerja Unit & Distribusi Material</p>
+    <div class="header-container">
+        <div>
+            <h1 class="main-title">📊 Kinerja Produksi</h1>
+            <p class="subtitle">Monitoring Realisasi vs Target Produksi (Daily)</p>
+        </div>
+        <div class="status-indicator status-active">
+            <span class="status-dot"></span> Live Data
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. LOAD & FILTER DATA
+    # 1. GET PRELOADED DATA (INSTANT)
     # ----------------------------------------
-    with st.spinner("Loading Production Data..."):
-        df_prod_raw = load_produksi() # Keep raw copy
-        
-        # Timestamp Info
-        last_update = st.session_state.get('last_update_produksi', '-')
-        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
-        
-        # Feedback for Force Sync
-        if st.session_state.get('force_cloud_reload', False):
-            if not df_prod_raw.empty:
-                 st.toast("✅ Cloud Data Linked!", icon="☁️")
-            else:
-                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
-        
-        df_prod = apply_global_filters(df_prod_raw) # Apply to main df
-        
-        # Explicitly filter invalid Tonnase (was previously done in loader)
-        # This allows us to track how many rows are dropped in Debug
-        if 'Tonnase' in df_prod.columns:
-             df_prod = df_prod[df_prod['Tonnase'] > 0]
-        
+    # Use preloaded data from session_state (no DB query on module switch)
+    df_prod_raw = st.session_state.get('df_prod', pd.DataFrame())
+    
+    # Fallback if not preloaded (first load or after sync)
+    if df_prod_raw.empty:
+        with st.spinner("Loading Production Data..."):
+            df_prod_raw = load_produksi()
+    
+    # Timestamp Info
+    last_update = st.session_state.get('last_update_produksi', '-')
+    st.caption(f"🕒 Data: **{last_update}** | ⚡ Pre-loaded")
+    
+    df_prod = apply_global_filters(df_prod_raw) # Apply to main df
+    
+    # Explicitly filter invalid Tonnase (was previously done in loader)
+    # This allows us to track how many rows are dropped in Debug
+    if 'Tonnase' in df_prod.columns:
+        df_prod = df_prod[df_prod['Tonnase'] > 0]
+    
     # -----------------------------------------------------
 
     if df_prod.empty:
@@ -222,7 +197,7 @@ def show_produksi():
             fig.update_layout(
                 title="Pencapaian Produksi Harian",
                 xaxis=dict(title="Tanggal", tickformat='%d %b'),
-                yaxis=dict(title="Tonase (Ton)", showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)'),
+                yaxis=dict(title="Tonnase (Ton)", showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)'),
                 legend=dict(orientation="h", y=-0.3, x=0.5, xanchor="center", bgcolor='rgba(0,0,0,0)'),
                 hovermode="x unified",
                 margin=dict(l=20, r=20, t=50, b=80)
@@ -353,22 +328,32 @@ def show_produksi():
         # USE RAW FILTERED DATA (Includes 0 Tonnase)
         df_display = apply_global_filters(df_prod_raw).copy()
         
-        # Sort desc
-        df_display = df_display.iloc[::-1]
+        # Sort ascending (oldest data first - chronological order)
         
         if 'Date' in df_display.columns:
-             df_display['Date'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+             # Fix AttributeError: Can only use .dt accessor with datetimelike values
+             # Since DB returns datetime.date objects, use astype(str)
+             df_display['Date'] = df_display['Date'].astype(str)
              
-        display_cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 
+        display_cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commodity', 
                         'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         df_display = df_display[[c for c in display_cols if c in df_display.columns]]
+        
+        # Display Sort: Descending (Newest First - matches DB insert order)
+        if 'Date' in df_display.columns and 'Time' in df_display.columns:
+            df_display = df_display.sort_values(by=['Date', 'Time'], ascending=False)
              
         st.dataframe(df_display, use_container_width=True)
         
-        # Excel Download (Sort Ascending = Oldest Data First)
-        # MATCHING TABLE COLUMNS EXACTLY
+        # Excel Download (Sort Ascending = OLDEST FIRST for chronological order)
+        # User Req: Data paling lama di paling atas saat download
+        
         # 1. Sort raw data first
-        df_sorted = apply_global_filters(df_prod_raw).sort_values(by=['Date', 'Time'], ascending=True) if 'Time' in df_prod_raw.columns else apply_global_filters(df_prod_raw).sort_values(by='Date', ascending=True)
+        df_sorted = apply_global_filters(df_prod_raw)
+        if 'Date' in df_sorted.columns and 'Time' in df_sorted.columns:
+             df_sorted = df_sorted.sort_values(by=['Date', 'Time'], ascending=True)
+        elif 'Date' in df_sorted.columns:
+             df_sorted = df_sorted.sort_values(by='Date', ascending=True)
         
         # 2. Format Date to match table string format
         if 'Date' in df_sorted.columns:

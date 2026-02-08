@@ -59,17 +59,36 @@ def show_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. LOAD & FILTER DATA
+    # 1. GET DATA (From session_state OR disk cache)
     # ----------------------------------------
-    with st.spinner("Memuat Data Eksekutif..."):
-        # Load Raw Data
+    # Try session_state first, fallback to disk-cached loaders
+    df_prod = st.session_state.get('df_prod')
+    if df_prod is None or df_prod.empty:
         df_prod = load_produksi()
+        st.session_state['df_prod'] = df_prod
+    
+    df_gangguan = st.session_state.get('df_gangguan')
+    if df_gangguan is None or df_gangguan.empty:
         df_gangguan = load_gangguan_all()
-        df_shipping = load_shipping_data()       # NEW: Load Shipping
-        df_stockpile = load_stockpile_hopper()   # NEW: Load Stockpile
+        st.session_state['df_gangguan'] = df_gangguan
+    
+    df_shipping = st.session_state.get('df_shipping')
+    if df_shipping is None or df_shipping.empty:
+        df_shipping = load_shipping_data()
+        st.session_state['df_shipping'] = df_shipping
+    
+    df_stockpile = st.session_state.get('df_stockpile')
+    if df_stockpile is None or df_stockpile.empty:
+        df_stockpile = load_stockpile_hopper()
+        st.session_state['df_stockpile'] = df_stockpile
+    
+    df_ritase = pd.DataFrame()  # Fallback for front analysis
+
+
+    # Debug Timing (Removed per User Request)
+    # st.sidebar.markdown("### ⏱️ Performance Monitor")
         
-        # Apply Global Filters
-      # 1. APPLY GLOBAL FILTERS
+    # Apply Global Filters
     # ----------------------------------------
     # Apply filters to ALL dataframes to ensure consistency
     # Note: apply_global_filters handles date range & shift filtering
@@ -221,8 +240,15 @@ def show_dashboard():
                         line=dict(color='red', width=2, dash='dash')
                      ))
                 else:
-                     # Fallback
-                     fig.add_hline(y=DAILY_PRODUCTION_TARGET, line_dash="dash", line_color="red", annotation_text="Target RKAP")
+                     # Fallback (Static Line but in Legend)
+                     # Use Scatter to ensure it appears in Legend consistent with Internal Target
+                     fig.add_trace(go.Scatter(
+                        x=[daily['Date'].min(), daily['Date'].max()],
+                        y=[DAILY_PRODUCTION_TARGET, DAILY_PRODUCTION_TARGET],
+                        mode='lines',
+                        name='Target RKAP',
+                        line=dict(color='red', width=2, dash='dash')
+                     ))
 
                 # Add Internal Target Line (Static 25,000)
                 # Use add_trace (Scatter) instead of hline so it appears in Legend
@@ -407,24 +433,29 @@ def show_dashboard():
             # Cleanup
             recap_df = recap_df.fillna(0)
             
-            # Format Date
-            recap_df['Date'] = recap_df['Date'].dt.strftime('%d-%b-%Y')
+            # --- DISPLAY: SORT DESCENDING (NEWEST FIRST) ---
+            df_display = recap_df.sort_values(by='Date', ascending=False).copy()
+            
+            # Format Date for Display
+            df_display['Date'] = df_display['Date'].dt.strftime('%d-%b-%Y')
             
             # Display
-            st.dataframe(recap_df, use_container_width=True, hide_index=True)
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
             
-            # Prepare Excel Download (OLDEST to NEWEST)
-            # Note: df_display is currently reversed (Newest First) for display
-            # So we can just reverse it back or sort df_prod
-            df_download = df_prod.sort_values(by=['Date', 'TimeStr'], ascending=True) if 'TimeStr' in df_prod.columns else df_prod.sort_values(by='Date', ascending=True)
+            # --- DOWNLOAD: SORT ASCENDING (OLDEST FIRST) & AGGREGATED ---
+            # Use aggregated recap_df, NOT raw df_prod
+            df_download = recap_df.sort_values(by='Date', ascending=True).copy()
+            
+            # Format Date for Excel
+            df_download['Date'] = df_download['Date'].dt.strftime('%Y-%m-%d')
              
             from utils.helpers import convert_df_to_excel
             excel_data = convert_df_to_excel(df_download)
             
             st.download_button(
-                label="📥 Unduh Data (Excel)",
+                label="📥 Unduh Rekap (Excel)",
                 data=excel_data,
-                file_name=f"PTSP_Ringkasan_Eksekutif_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                file_name=f"PTSP_Ringkasan_Harian_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )

@@ -49,6 +49,7 @@ def load_daily_plan_data():
 
 
 
+@st.cache_data(ttl=3600*24) # Cache image for 24 hours
 def get_image_base64(image_path):
     """Convert image to base64 for Plotly"""
     try:
@@ -57,6 +58,40 @@ def get_image_base64(image_path):
     except:
         return None
 
+
+# ============================================================
+# MAP VISUALIZATION HELPERS
+# ============================================================
+
+def resolve_location_id(row):
+    """
+    Centralized logic to resolve Location ID from Grid/Blok.
+    Used by both Map Plotting and KPI Calculation to ensure consistency.
+    """
+    grid = str(row['Grid']).strip() if pd.notna(row['Grid']) else ''
+    blok = str(row['Blok']).strip().upper() if pd.notna(row['Blok']) else ''
+    
+    # Normalize Blok for comparison (remove spaces)
+    blok_clean = blok.replace(' ', '').replace('-', '').upper()
+    
+    # Rule: Blok SP6 / SP 6 overrides Grid choice -> Maps to K3
+    # Match SP6, STOCKPILE6, etc.
+    if 'SP6' in blok_clean or 'STOCKPILE6' in blok_clean:
+        return 'K3'
+        
+    # Rule: Blok SP3 / SP 3 overrides -> Maps to SP3 (Top Left)
+    if 'SP3' in blok_clean or 'STOCKPILE3' in blok_clean:
+        return 'SP3'
+    
+    # Rule: Jika Grid terisi -> lokasi_id = Grid
+    if grid and grid.lower() != 'nan':
+        return grid
+    
+    # Rule: Jika Grid kosong dan Blok terisi -> lokasi_id = Blok
+    if blok and blok.lower() != 'nan':
+        return blok
+    
+    return None
 
 # ============================================================
 # MAP VISUALIZATION
@@ -99,30 +134,11 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     )
     
     # ------------------------------------------------------------
-    # 1. LOAD DATA
+    # 1. LOAD DATA (REMOVED REDUNDANT LOAD & UI SIDE EFFECTS)
     # ----------------------------------------
-    with st.spinner("Loading Daily Plan..."):
-        df_plan = load_daily_plan()
-        
-        # Timestamp Info
-        last_update = st.session_state.get('last_update_daily_plan', '-')
-        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
-
-        # --- DEBUG SECTION ---
-        if 'debug_log_daily_plan' in st.session_state and st.session_state['debug_log_daily_plan']:
-            with st.expander("🛠️ DEBUG DATA INFO (Klik untuk analisa)"):
-                st.warning("⚠️ Jika data tidak muncul, kirimkan pesan di bawah ini ke tim developer:")
-                st.code(st.session_state['debug_log_daily_plan'])
-                
-                # Show raw data head if available
-                if not df_plan.empty:
-                    st.divider()
-                    st.write(f"Total Data (Dari OneDrive): {len(df_plan)}")
-                    st.write("5 Baris Teratas:", df_plan.head())
-        # ---------------------
-        
-        if df_plan.empty:
-            return fig
+    # Data is already passed via df_filtered argument.
+    # UI elements (st.caption, st.expander) removed from cached function.
+    
     mask = (
         df_filtered['Tanggal'].notna() &
         df_filtered['Shift'].notna() & df_filtered['Shift'].astype(str).str.strip().ne('') &
@@ -139,33 +155,10 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     # ------------------------------------------------------------
     # 2. DETERMINE LOCATION ID (MAPPING)
     # ------------------------------------------------------------
-    def resolve_location_id(row):
-        grid = str(row['Grid']).strip() if pd.notna(row['Grid']) else ''
-        blok = str(row['Blok']).strip().upper() if pd.notna(row['Blok']) else ''
-        
-        # Normalize Blok for comparison (remove spaces)
-        blok_clean = blok.replace(' ', '').replace('-', '').upper()
-        
-        # Rule: Blok SP6 / SP 6 overrides Grid choice -> Maps to K3
-        # Match SP6, STOCKPILE6, etc.
-        if 'SP6' in blok_clean or 'STOCKPILE6' in blok_clean:
-            return 'K3'
-            
-        # Rule: Blok SP3 / SP 3 overrides -> Maps to SP3 (Top Left)
-        if 'SP3' in blok_clean or 'STOCKPILE3' in blok_clean:
-            return 'SP3'
-        
-        # Rule: Jika Grid terisi -> lokasi_id = Grid
-        if grid and grid.lower() != 'nan':
-            return grid
-        
-        # Rule: Jika Grid kosong dan Blok terisi -> lokasi_id = Blok
-        if blok and blok.lower() != 'nan':
-            return blok
-        
-        return None
+    # Logic moved to global helper resolve_location_id for consistency with KPIs
 
     df_map['lokasi_id'] = df_map.apply(resolve_location_id, axis=1)
+
     # Remove rows where location couldn't be resolved
     df_map = df_map[df_map['lokasi_id'].notna()]
 
@@ -671,21 +664,25 @@ def create_data_table(df_filtered):
     if 'Tanggal' in display_df.columns:
         display_df['Tanggal'] = pd.to_datetime(display_df['Tanggal'], errors='coerce').dt.strftime('%Y-%m-%d')
         
+    # Calculate Hari if missing (from Tanggal)
+    if 'Hari' not in display_df.columns and 'Tanggal' in display_df.columns:
+        try:
+            day_map = {0: 'Senin', 1: 'Selasa', 2: 'Rabu', 3: 'Kamis', 4: 'Jumat', 5: 'Sabtu', 6: 'Minggu'}
+            display_df['Hari'] = pd.to_datetime(display_df['Tanggal']).dt.dayofweek.map(day_map)
+        except:
+            pass
+            
     # Format Hari (Fix for datetime appearing as 2026-01-26)
     if 'Hari' in display_df.columns:
         day_map = {0: 'Senin', 1: 'Selasa', 2: 'Rabu', 3: 'Kamis', 4: 'Jumat', 5: 'Sabtu', 6: 'Minggu'}
         def fix_hari(val):
-            # If it's a timestamp/datetime, convert to day name
+            # Same logic as before
             if isinstance(val, (pd.Timestamp, datetime)):
-                # Ensure it's a pandas Timestamp for .dayofweek, or use .weekday() for python datetime
-                # safer to just convert to pandas timestamp
                 try:
                     ts = pd.Timestamp(val)
                     return day_map.get(ts.dayofweek, '')
                 except:
                     return ''
-            
-            # If it's a string looking like a date (YYYY-MM-DD...)
             s = str(val)
             if '202' in s and '-' in s: 
                 try:
@@ -704,6 +701,47 @@ def create_data_table(df_filtered):
             display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
             # Replace NaN with empty string for display
             display_df[col] = display_df[col].apply(lambda x: '' if pd.isna(x) else f'{int(x):,}' if x == int(x) else f'{x:,.1f}')
+            
+    # RENAME HEADERS TO DB FORMAT (LOWERCASE) PER USER REQUEST
+    # Internal logic used Title Case, but Display must be lowercase
+    rename_db = {
+        'Hari': 'Hari', # Keep Hari as is? Or hari? DB doesn't have Hari. Let's keep Hari Title Case as it's computed? Or User probably wants 'hari'? Let's try 'hari' for consistency.
+        'Tanggal': 'tanggal',
+        'Shift': 'shift',
+        'Batu Kapur': 'batu_kapur',
+        'Silika': 'silika',
+        'Clay': 'clay',
+        'Alat Muat': 'alat_muat',
+        'Alat Angkut': 'alat_angkut',
+        'Blok': 'blok',
+        'Grid': 'grid',
+        'ROM': 'rom',
+        'Keterangan': 'keterangan'
+    }
+    display_df = display_df.rename(columns=rename_db)
+    
+    # RENAME HEADERS TO TITLE CASE (User Request: "Sesuai Database" structure but better display)
+    header_map = {
+        'hari': 'Hari',
+        'tanggal': 'Tanggal',
+        'shift': 'Shift',
+        'batu_kapur': 'Batu Kapur',
+        'silika': 'Silika',
+        'clay': 'Clay',
+        'alat_muat': 'Alat Muat',
+        'alat_angkut': 'Alat Angkut',
+        'blok': 'Blok',
+        'grid': 'Grid',
+        'rom': 'ROM',
+        'keterangan': 'Keterangan'
+    }
+    display_df = display_df.rename(columns=header_map)
+    
+    # Display Sort: Ascending (Oldest First / DB Order)
+    if 'Tanggal' in display_df.columns:
+        sort_cols = ['Tanggal']
+        if 'Shift' in display_df.columns: sort_cols.append('Shift')
+        display_df = display_df.sort_values(by=sort_cols, ascending=True)
     
     return display_df
 
@@ -730,6 +768,15 @@ def show_daily_plan():
     # Ensure Tanggal is datetime
     if 'Tanggal' in df.columns:
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+        
+    # FIX: Calculate 'Hari' if missing (essential for Filters sidebar)
+    if 'Hari' not in df.columns and 'Tanggal' in df.columns:
+        day_map = {0: 'Senin', 1: 'Selasa', 2: 'Rabu', 3: 'Kamis', 4: 'Jumat', 5: 'Sabtu', 6: 'Minggu'}
+        # Handle errors gracefully
+        try:
+             df['Hari'] = df['Tanggal'].dt.dayofweek.map(day_map).fillna('')
+        except:
+             df['Hari'] = ''
 
     # ============================================================
     # HEADER (Already rendered above, skipping re-render if not needed)
@@ -992,24 +1039,31 @@ def show_daily_plan():
         df_filtered = df_filtered[material_mask]
     
     # ============================================================
-    # KPI METRICS
+    # KPI METRICS (Revised: Production & Fleet Focus)
     # ============================================================
     st.markdown("---")
     
-    kpi_cols = st.columns(5)
+    # Calculate Total Target (Ton)
+    total_target = 0
+    mat_cols = ['Batu Kapur', 'Silika', 'Clay']
+    for col in mat_cols:
+        if col in df_filtered.columns:
+            total_target += pd.to_numeric(df_filtered[col], errors='coerce').fillna(0).sum()
+    
+    kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #00D4FF22, #00D4FF11); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #00D4FF44;">
-            <div style="font-size: 28px; font-weight: bold; color: #00D4FF;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Total Operasi</div>
+            <div style="font-size: 28px; font-weight: bold; color: #00D4FF;">{:,.0f}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Total Target (Ton)</div>
         </div>
-        """.format(len(df_filtered)), unsafe_allow_html=True)
+        """.format(total_target), unsafe_allow_html=True)
     
     with kpi_cols[1]:
-        active_exc = df_filtered['Alat Muat'].dropna().nunique()
+        active_exc = df_filtered['Alat Muat'].dropna().nunique() if 'Alat Muat' in df_filtered.columns else 0
         st.markdown("""
         <div style="background: linear-gradient(135deg, #FFD70022, #FFD70011); 
                     padding: 15px; border-radius: 10px; text-align: center;
@@ -1020,7 +1074,29 @@ def show_daily_plan():
         """.format(active_exc), unsafe_allow_html=True)
     
     with kpi_cols[2]:
-        active_grids = df_filtered['Grid'].dropna().nunique()
+        active_hauler = df_filtered['Alat Angkut'].dropna().nunique() if 'Alat Angkut' in df_filtered.columns else 0
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #FFA50022, #FFA50011); 
+                    padding: 15px; border-radius: 10px; text-align: center;
+                    border: 1px solid #FFA50044;">
+            <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Hauler (DT) Aktif</div>
+        </div>
+        """.format(active_hauler), unsafe_allow_html=True)
+    
+    with kpi_cols[3]:
+        # FIX: KPI counts distinct PHYSICAL LOCATIONS (User confirmed: multiple labels at 1 point = 1 location)
+        # Map may show 6 labels (due to multiple fleets), but KPI should show 5 locations.
+        if 'Grid' in df_filtered.columns and 'Blok' in df_filtered.columns:
+             # Create temp df for calculation
+             df_kpi = df_filtered.copy()
+             # Use shared helper
+             df_kpi['lokasi_id'] = df_kpi.apply(resolve_location_id, axis=1)
+             # Count unique PHYSICAL LOCATIONS
+             active_grids = df_kpi['lokasi_id'].dropna().nunique()
+        else:
+             active_grids = 0
+
         st.markdown("""
         <div style="background: linear-gradient(135deg, #00FF8822, #00FF8811); 
                     padding: 15px; border-radius: 10px; text-align: center;
@@ -1029,28 +1105,6 @@ def show_daily_plan():
             <div style="font-size: 12px; color: #B0B0B0;">Lokasi Aktif</div>
         </div>
         """.format(active_grids), unsafe_allow_html=True)
-    
-    with kpi_cols[3]:
-        krp_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper() == 'KRP']) if 'Blok' in df_filtered.columns else 0
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #00BFFF22, #00BFFF11); 
-                    padding: 15px; border-radius: 10px; text-align: center;
-                    border: 1px solid #00BFFF44;">
-            <div style="font-size: 28px; font-weight: bold; color: #00BFFF;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">KRP (Kapur)</div>
-        </div>
-        """.format(krp_count), unsafe_allow_html=True)
-    
-    with kpi_cols[4]:
-        tjr_count = len(df_filtered[df_filtered['Blok'].astype(str).str.upper() == 'TJR']) if 'Blok' in df_filtered.columns else 0
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #FFA50022, #FFA50011); 
-                    padding: 15px; border-radius: 10px; text-align: center;
-                    border: 1px solid #FFA50044;">
-            <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">TJR (Tajarang)</div>
-        </div>
-        """.format(tjr_count), unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -1077,6 +1131,16 @@ def show_daily_plan():
     month_id = month_names.get(selected_date.month, str(selected_date.month))
     date_str = f"{selected_date.day} {month_id} {selected_date.year}"
     
+    # DEBUG: Show sync info
+    if 'debug_log_daily_plan' in st.session_state and st.session_state['debug_log_daily_plan']:
+        with st.expander("🛠️ DEBUG DATA INFO (Klik untuk analisa)"):
+            st.warning("⚠️ Jika data tidak muncul, kirimkan pesan di bawah ini ke tim developer:")
+            st.code(st.session_state['debug_log_daily_plan'])
+            st.divider()
+            st.write(f"Total Data (Raw): {len(df)}")
+            if len(df) > 0:
+                st.write("5 Baris Teratas:", df.head())
+
     # Generate Map
     shift_label = ', '.join(selected_shifts) if len(selected_shifts) <= 3 else f"{len(selected_shifts)} shifts"
     fig = create_mining_map(df_filtered, pd.Timestamp(selected_date), shift_label)

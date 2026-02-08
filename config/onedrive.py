@@ -52,10 +52,11 @@ def get_onedrive_path():
     for path in base_paths:
         if os.path.exists(path):
             normalized = os.path.normpath(path)
-            print(f"✅ Found OneDrive folder: {normalized}")
-            return normalized
+            if os.path.isdir(normalized):
+                print(f"Found OneDrive folder: {normalized}")
+                return normalized
     
-    print("⚠️ OneDrive folder not found, using relative path 'data'")
+    print("OneDrive folder not found, using relative path 'data'")
     return "data"
 
 ONEDRIVE_FOLDER = get_onedrive_path()

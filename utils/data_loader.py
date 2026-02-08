@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import time
 
 from datetime import datetime, timedelta
+from utils.db_manager import get_db_engine
 
 # Import Settings
 # Import Settings
@@ -30,7 +31,7 @@ except ImportError:
     MONITORING_EXCEL_PATH = None
     PRODUKSI_FILE = None
     GANGGUAN_FILE = None
-    CACHE_TTL = 300
+    CACHE_TTL = 3600 # 1 Hour Default
     ONEDRIVE_LINKS = {}
     LOCAL_FILE_NAMES = {}
 
@@ -61,7 +62,9 @@ def apply_global_filters(df, date_col='Date', shift_col='Shift'):
         df = df[mask]
         
     # 2. Filter Shift
-    if selected_shift and selected_shift != "All Displatch" and shift_col in df.columns:
+    # Check for both "All Dispatch" (corrected) and "All Displatch" (legacy typo) and "All" (just in case)
+    ignore_shifts = ["All Dispatch", "All Displatch", "All"]
+    if selected_shift and selected_shift not in ignore_shifts and shift_col in df.columns:
         # Normalize shift values (some might be int 1, some 'Shift 1')
         target_shift = 1 if "1" in str(selected_shift) else (2 if "2" in str(selected_shift) else 3)
         
@@ -273,14 +276,68 @@ def normalize_excavator_column(df):
 # LOAD PRODUKSI - FIXED VERSION
 # ============================================================
 
-@st.cache_data(ttl=CACHE_TTL)
-def load_produksi():
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
+def load_produksi(start_date=None):
     """Load data produksi - FIXED & ROBUST with Header Scanning"""
     df = None
     debug_log = []
+
+
     
+    # 0. TRY DATABASE LOAD (Priority)
+    try:
+        engine = get_db_engine()
+        if engine:
+            if start_date:
+                query = f"SELECT * FROM production_logs WHERE date >= '{start_date}'"
+            else:
+                query = "SELECT * FROM production_logs WHERE date >= '2026-01-01'"
+            # Optional: Add date filter if implemented parameters
+            
+            df_db = pd.read_sql(query, engine)
+            print(f"[DEBUG] DB Load Result: {len(df_db)} rows. Columns: {list(df_db.columns)}")
+            if not df_db.empty:
+                # Map DB columns to Dashboard/Excel standard
+                rename_map = {
+                    'date': 'Date',
+                    'shift': 'Shift',
+                    'time': 'Time',
+                    'blok': 'BLOK',
+                    'dump_truck': 'Dump Truck',
+                    'excavator': 'Excavator',
+                    'front': 'Front',
+                    'commodity': 'Commodity',
+                    'rit': 'Rit',
+                    'tonnase': 'Tonnase',
+                    'dump_loc': 'Dump Loc'
+                }
+                df_db = df_db.rename(columns=rename_map)
+                
+                # Ensure Types
+                if 'Date' in df_db.columns:
+                    df_db['Date'] = pd.to_datetime(df_db['Date'])
+                    df_db['Date'] = df_db['Date'].dt.date
+                
+                debug_log.append(f"Loaded {len(df_db)} rows from Database.")
+                debug_log.append(f"Loaded {len(df_db)} rows from Database.")
+                st.session_state['debug_log_produksi'] = debug_log
+                
+                # Telemetry: Mark as FRESH DB LOAD
+                st.session_state['source_produksi'] = f"DATABASE (Fresh Load @ {datetime.now().strftime('%H:%M:%S')})"
+                return df_db
+    except Exception as e:
+        print(f"[DEBUG] ❌ DB LOAD FAILED: {str(e)}")
+        debug_log.append(f"DB Load Error: {str(e)}")
+        return pd.DataFrame() # Force Stop
+        
+    except Exception as e:
+        print(f"[DEBUG] ❌ DB LOAD FAILED: {str(e)}")
+        debug_log.append(f"DB Load Error: {str(e)}")
+        return pd.DataFrame() # Force Stop
+        
     # Generic loader
     def load_content(source):
+
         try:
             xls = pd.ExcelFile(source)
             valid_dfs = []
@@ -404,20 +461,21 @@ def load_produksi():
         else:
             debug_log.append("Error: Production Link is EMPTY in settings")
     
-    # 2. Try OneDrive (Fallback)
-    if (df is None or df.empty) and ONEDRIVE_LINKS.get("produksi") and not force_sync:
-        try:
-            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"], cache_bust=False)
-            if file_buffer:
-                df = load_content(file_buffer)
-                if df is not None and not df.empty:
-                   st.session_state['last_update_produksi'] = datetime.now().strftime("%H:%M")
-                else:
-                    debug_log.append("Fallback Sync: Content load returned empty")
-            else:
-                debug_log.append("Fallback Sync: Download returned None (Silent Error)")
-        except Exception as e:
-             debug_log.append(f"Fallback Sync Error: {str(e)}")
+    # 2. Try OneDrive (Fallback) - DISABLED FOR DB-ONLY ARCHITECTURE
+    # if (df is None or df.empty) and ONEDRIVE_LINKS.get("produksi") and not force_sync:
+    #     try:
+    #         debug_log.append("Fallback Sync DISABLED: Dashboard is now DB-Only.")
+            # file_buffer = download_from_onedrive(ONEDRIVE_LINKS["produksi"], cache_bust=False)
+            # if file_buffer:
+            #     df = load_content(file_buffer)
+            #     if df is not None and not df.empty:
+            #        st.session_state['last_update_produksi'] = datetime.now().strftime("%H:%M")
+            #     else:
+            #         debug_log.append("Fallback Sync: Content load returned empty")
+            # else:
+            #     debug_log.append("Fallback Sync: Download returned None (Silent Error)")
+    #     except Exception as e:
+    #          debug_log.append(f"Fallback Sync Error: {str(e)}")
     
     # SAVE DEBUG LOG TO SESSION STATE
     st.session_state['debug_log_produksi'] = debug_log
@@ -450,10 +508,10 @@ def load_produksi():
         for c in df.columns:
             cl = c.lower()
             if 'excavator' in cl: col_map[c] = 'Excavator'
-            elif 'commodity' in cl or 'commudity' in cl or 'komoditas' in cl: col_map[c] = 'Commudity'
+            elif 'commodity' in cl or 'commudity' in cl or 'komoditas' in cl: col_map[c] = 'Commodity'
             elif 'unit' in cl or 'dump truck' in cl or 'dt' == cl: col_map[c] = 'Dump Truck'
             elif 'ritase' in cl or 'rit' == cl: col_map[c] = 'Rit'
-            elif 'tonnase' in cl or 'tonase' in cl or 'ton' in cl: col_map[c] = 'Tonnase'
+            elif 'tonnase' in cl or 'tonase' in cl or 'ton' in cl: col_map[c] = 'Tonase'
             elif 'blok' in cl: col_map[c] = 'BLOK'
             elif 'front' in cl: col_map[c] = 'Front'
             elif 'dump' in cl and 'loc' in cl: col_map[c] = 'Dump Loc'
@@ -461,7 +519,7 @@ def load_produksi():
         df = df.rename(columns=col_map)
         
         # Numeric conversions
-        for col in ['Rit', 'Tonnase']:
+        for col in ['Rit', 'Tonase']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                 
@@ -481,7 +539,7 @@ def load_produksi():
 # OTHER LOAD FUNCTIONS (GANGGUAN, BBM, etc)
 # ============================================================
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_gangguan(bulan):
     """Load data gangguan per bulan (ringkasan)"""
     sheet = f'Monitoring {bulan}'
@@ -522,8 +580,8 @@ def load_gangguan(bulan):
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
-def load_gangguan_enhanced():
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
+def load_gangguan_all(start_date=None):
     """
     Load data gangguan lengkap (DEBUG MODE).
     Prioritizes 2026 data sheets (e.g., 'Monitoring Jan 2026').
@@ -532,10 +590,71 @@ def load_gangguan_enhanced():
     file_buffer = None
     debug_log = []
     
+    # 0. TRY DATABASE LOAD (Priority)
+    try:
+        engine = get_db_engine()
+        if engine:
+            if start_date:
+                query = f"SELECT * FROM downtime_logs WHERE tanggal >= '{start_date}'"
+            else:
+                query = "SELECT * FROM downtime_logs WHERE tanggal >= '2026-01-01'"
+            
+            df_db = pd.read_sql(query, engine)
+            
+            if not df_db.empty:
+                rename_map = {
+                    'tanggal': 'Tanggal',
+                    'shift': 'Shift',
+                    'start': 'Start',
+                    'end': 'End',
+                    'durasi': 'Durasi',
+                    'crusher': 'Crusher',
+                    'alat': 'Alat',
+                    'remarks': 'Remarks',
+                    'kelompok_masalah': 'Kelompok Masalah',
+                    'gangguan': 'Gangguan',
+                    'info_ccr': 'Info CCR',
+                    'sub_komponen': 'Sub Komponen',
+                    'keterangan': 'Keterangan',
+                    'penyebab': 'Penyebab',
+                    'identifikasi_masalah': 'Identifikasi Masalah',
+                    'action': 'Action',
+                    'plan': 'Plan',
+                    'pic': 'PIC',
+                    'status': 'Status',
+                    'due_date': 'Due Date',
+                    'spare_part': 'Spare Part',
+                    'info_spare_part': 'Info Spare Part',
+                    'link_lampiran': 'Link/Lampiran',
+                    'extra': 'Extra'
+                }
+                df_db = df_db.rename(columns=rename_map)
+                
+                if 'Tanggal' in df_db.columns:
+                     df_db['Tanggal'] = pd.to_datetime(df_db['Tanggal'])
+                     
+                     # 1. Add Bulan (Name - Indonesian)
+                     MONTH_IND = {
+                         1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+                         7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+                     }
+                     df_db['Bulan'] = df_db['Tanggal'].dt.month.map(MONTH_IND)
+                     # 2. Add Tahun
+                     df_db['Tahun'] = df_db['Tanggal'].dt.year
+                     # 3. Add Week
+                     df_db['Week'] = df_db['Tanggal'].dt.isocalendar().week
+                
+                debug_log.append(f"Loaded {len(df_db)} rows from Database (Downtime).")
+                st.session_state['debug_log_gangguan'] = debug_log
+                return df_db
+    except Exception as e:
+        debug_log.append(f"DB Load Error: {str(e)}")
+
     # 0. Check Force Sync
     force_sync = st.session_state.get('force_cloud_reload', False)
     
     if force_sync:
+
         # Force reload config to ensure latest link
         import importlib
         import config.settings
@@ -561,14 +680,15 @@ def load_gangguan_enhanced():
             except Exception as e:
                 debug_log.append(f"Gangguan Sync Error: {str(e)}")
     
-    # 1. Try OneDrive (Fallback)
-    if file_path is None and file_buffer is None and ONEDRIVE_LINKS.get("gangguan") and not force_sync:
-        try:
-            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
-            if file_buffer:
-                 st.session_state['last_update_gangguan'] = datetime.now().strftime("%H:%M")
-        except Exception as e:
-            debug_log.append(f"Gangguan Fallback Error: {str(e)}")
+    # 1. Try OneDrive (Fallback) - DISABLED FOR DB-ONLY ARCHITECTURE
+    # if file_path is None and file_buffer is None and ONEDRIVE_LINKS.get("gangguan") and not force_sync:
+    #     try:
+    #         debug_log.append("Fallback Sync DISABLED: Dashboard is now DB-Only.")
+            # file_buffer = download_from_onedrive(ONEDRIVE_LINKS["gangguan"])
+            # if file_buffer:
+            #      st.session_state['last_update_gangguan'] = datetime.now().strftime("%H:%M")
+    #     except Exception as e:
+    #         debug_log.append(f"Gangguan Fallback Error: {str(e)}")
             
     # Save log
     st.session_state['debug_log_gangguan'] = debug_log
@@ -837,127 +957,10 @@ def get_gangguan_summary(df):
     }
 
 
-@st.cache_data(ttl=CACHE_TTL)
-def load_bbm_enhanced():
-    """
-    Load and transform BBM data to Long Format [Date, Unit, Category, Liters]
-    (DEBUG MODE ENABLED)
-    """
-    df = None
-    sheet_name = 'BBM'
-    debug_log = []
-    
-    # 0. Check Force Sync (Prioritize explicit reload)
-    force_sync = st.session_state.get('force_cloud_reload', False)
-    
-    if force_sync:
-        link = ONEDRIVE_LINKS.get("monitoring")
-        if link:
-            try:
-                debug_log.append(f"Attempting download (BBM). Link: {link[:20]}...")
-                direct_url = convert_onedrive_link(link, cache_bust=True)
-                debug_log.append(f"Converted URL (BBM): {direct_url}")
-                
-                file_buffer = download_from_onedrive(link, cache_bust=True)
-                if file_buffer:
-                    st.session_state['last_update_bbm'] = datetime.now().strftime("%H:%M")
-                    try:
-                        df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-                    except Exception as e:
-                        debug_log.append(f"BBM Excel Read Error: {str(e)}")
-                else:
-                    debug_log.append("BBM Sync failed: No buffer returned")
-            except Exception as e:
-                debug_log.append(f"BBM Cloud Sync Error: {str(e)}")
-
-    # 1. Standard Cloud Load (Fallback)
-    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring") and not force_sync:
-        try:
-            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-            if file_buffer:
-                st.session_state['last_update_bbm'] = datetime.now().strftime("%H:%M")
-                try:
-                    df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-                except: pass
-        except Exception as e:
-            debug_log.append(f"BBM Fallback Error: {str(e)}")
-            
-    # Save log
-    st.session_state['debug_log_bbm'] = debug_log
-            
-    if df is None or df.empty:
-        return pd.DataFrame()
-        
-    try:
-        # Cleanup
-        if 'Total' in df.columns:
-            df = df[df['Total'] != 'Total'] # Remove footer rows if any
-            
-        # Identify Metadata columns vs Date columns
-        # Based on debug: ['No', 'Alat Berat', 'Tipe Alat', 'Kategori', '1', '2', ... 'Total']
-        meta_cols = ['No', 'Alat Berat', 'Tipe Alat', 'Kategori', 'Total']
-        
-        # Ensure regex/type matching for '1', '2', '31' columns
-        # Force columns to string for easier matching, but keep original for melt
-        df.columns = [str(c) for c in df.columns]
-        
-        # Re-identify date columns (digits 1-31)
-        date_cols = [c for c in df.columns if c.isdigit() and 1 <= int(c) <= 31]
-        
-        # Melt (Unpivot) to Long Format
-        # id_vars are the metadata columns that exist
-        current_meta = [c for c in meta_cols if c in df.columns]
-        
-        if not date_cols:
-            return pd.DataFrame() # No date columns found
-            
-        df_melted = df.melt(id_vars=current_meta, 
-                           value_vars=date_cols,
-                           var_name='Day', value_name='Liters')
-        
-        # Validation & Formatting
-        df_melted['Liters'] = pd.to_numeric(df_melted['Liters'], errors='coerce').fillna(0)
-        df_melted = df_melted[df_melted['Liters'] > 0]  # Optimize: remove zero records
-        
-        # Create full Date column
-        # Assuming current year (2026) and month (January) from context or file
-        current_year = 2026
-        current_month = 1 
-        
-        # Note: In a real app, month should be inferred from filename or user input.
-        # For now, we fix to Jan 2026 as per user context.
-        
-        dates = []
-        for day in df_melted['Day']:
-            try:
-                dates.append(pd.Timestamp(year=current_year, month=current_month, day=int(day)))
-            except:
-                dates.append(pd.NaT)
-        df_melted['Date'] = dates
-        df_melted = df_melted.dropna(subset=['Date'])
-        
-        # Standardize columns
-        final_cols = {
-            'Alat Berat': 'Unit',
-            'Tipe Alat': 'Type',
-            'Kategori': 'Category' 
-        }
-        df_melted = df_melted.rename(columns=final_cols)
-        
-        # Ensure required columns exist
-        required_cols = ['Date', 'Unit', 'Type', 'Category', 'Liters']
-        for col in required_cols:
-            if col not in df_melted.columns:
-                 df_melted[col] = None
-                 
-        return df_melted[required_cols].reset_index(drop=True)
-        
-    except Exception as e:
-        print(f"Error loading BBM enhanced: {e}")
-        return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
+
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_ritase_enhanced():
     """
     Load and transform Ritase data to Long Format [Date, Shift, Location, Ritase]
@@ -967,6 +970,26 @@ def load_ritase_enhanced():
     sheet_name = 'Ritase'
     debug_log = []
     
+    # 0. TRY DATABASE LOAD
+    try:
+        engine = get_db_engine()
+        if engine:
+            query = "SELECT * FROM ritase_logs"
+            df_db = pd.read_sql(query, engine)
+            if not df_db.empty:
+                rename_map = {
+                    'tanggal': 'Tanggal',
+                    'shift': 'Shift',
+                    'location': 'Location',
+                    'ritase': 'Ritase'
+                }
+                df_db = df_db.rename(columns=rename_map)
+                if 'Tanggal' in df_db.columns:
+                     df_db['Tanggal'] = pd.to_datetime(df_db['Tanggal'])
+                return df_db
+    except Exception as e:
+        debug_log.append(f"DB Load Error: {str(e)}")
+
     # 0. Check Force Sync
     force_sync = st.session_state.get('force_cloud_reload', False)
     
@@ -990,17 +1013,18 @@ def load_ritase_enhanced():
             except Exception as e:
                 debug_log.append(f"Ritase Cloud Sync Error: {str(e)}")
 
-    # 1. Standard Cloud Load (Cloud Only)
-    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring") and not force_sync:
-        try:
-            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-            if file_buffer:
-                st.session_state['last_update_ritase'] = datetime.now().strftime("%H:%M")
-                try:
-                    df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-                except: pass
-        except Exception as e:
-            debug_log.append(f"Ritase Fallback Error: {str(e)}")
+    # 1. Standard Cloud Load (Cloud Only) - DISABLED FOR DB-ONLY ARCHITECTURE
+    # if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring") and not force_sync:
+    #     try:
+    #         debug_log.append("Fallback Sync DISABLED: Dashboard is now DB-Only.")
+            # file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+            # if file_buffer:
+            #     st.session_state['last_update_ritase'] = datetime.now().strftime("%H:%M")
+            #     try:
+            #         df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+            #     except: pass
+    #     except Exception as e:
+    #         debug_log.append(f"Ritase Fallback Error: {str(e)}")
             
     # Save log
     st.session_state['debug_log_ritase'] = debug_log
@@ -1064,9 +1088,8 @@ def load_ritase_enhanced():
 # ==========================================
 # These functions are kept to prevent ImportErrors in other modules
 # that might still reference the old names.
-load_bbm = load_bbm_enhanced
 load_ritase = load_ritase_enhanced
-load_gangguan_all = load_gangguan_enhanced
+load_gangguan_enhanced = load_gangguan_all
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan():
@@ -1094,180 +1117,165 @@ def load_analisa_produksi(bulan='Januari'):
 def load_analisa_produksi_all():
     """Load Analisa Produksi for S-Curve (Plan vs Actual)"""
     df = None
-    sheet_name = 'Analisa Produksi'
+    # LEGACY FUNCTION DISABLED
+    return pd.DataFrame()
+    # sheet_name = 'Analisa Produksi'
     
-    # 0. Check Force Sync
-    force_sync = st.session_state.get('force_cloud_reload', False)
+    # # 0. Check Force Sync
+    # force_sync = st.session_state.get('force_cloud_reload', False)
     
-    if force_sync and ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"], cache_bust=True)
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-            except: pass
+    # if force_sync and ONEDRIVE_LINKS.get("monitoring"):
+    #     file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"], cache_bust=True)
+    #     if file_buffer:
+    #         try:
+    #             df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+    #         except: pass
 
-    # 1. Standard Cloud Load (Cloud Only)
-    if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name=sheet_name)
-            except: pass
+    # # 1. Standard Cloud Load (Cloud Only)
+    # if (df is None or df.empty) and ONEDRIVE_LINKS.get("monitoring"):
+    #     file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+    #     if file_buffer:
+    #         try:
+    #             df = pd.read_excel(file_buffer, sheet_name=sheet_name)
+    #         except: pass
             
-    if df is None or df.empty:
-        return pd.DataFrame()
+    # if df is None or df.empty:
+    #     return pd.DataFrame()
     
-    try:
-        # The sheet has multiple months horizontally.
-        # Structure: [Januari] [Februari] side by side
-        # Need to iterate and extract
+    # try:
+    #     # The sheet has multiple months horizontally.
+    #     # Structure: [Januari] [Februari] side by side
+    #     # Need to iterate and extract
         
-        processed_data = []
-        months = {'Januari': 0, 'Februari': 5, 'Maret': 10, 'April': 15, 'Mei': 20, 'Juni': 25, 
-                  'Juli': 30, 'Agustus': 35, 'September': 40, 'Oktober': 45, 'November': 50, 'Desember': 55}
+    #     processed_data = []
+    #     months = {'Januari': 0, 'Februari': 5, 'Maret': 10, 'April': 15, 'Mei': 20, 'Juni': 25, 
+    #               'Juli': 30, 'Agustus': 35, 'September': 40, 'Oktober': 45, 'November': 50, 'Desember': 55}
                   
-        for month_name, start_col in months.items():
-            try:
-                if start_col + 3 >= len(df.columns):
-                    continue
+    #     for month_name, start_col in months.items():
+    #         try:
+    #             if start_col + 3 >= len(df.columns):
+    #                 continue
                     
-                # Extract block
-                df_month = df.iloc[1:33, start_col:start_col+4].copy() # Assuming 31 days max + 1 header
-                df_month.columns = ['Day', 'Plan', 'Actual', 'Ach']
+    #             # Extract block
+    #             df_month = df.iloc[1:33, start_col:start_col+4].copy() # Assuming 31 days max + 1 header
+    #             df_month.columns = ['Day', 'Plan', 'Actual', 'Ach']
                 
-                # Clean
-                df_month = df_month.dropna(subset=['Day'])
-                df_month = df_month[pd.to_numeric(df_month['Day'], errors='coerce').notna()]
+    #             # Clean
+    #             df_month = df_month.dropna(subset=['Day'])
+    #             df_month = df_month[pd.to_numeric(df_month['Day'], errors='coerce').notna()]
                 
-                # Add Metadata
-                df_month['Month'] = month_name
+    #             # Add Metadata
+    #             df_month['Month'] = month_name
                 
-                # Convert numbers
-                df_month['Plan'] = pd.to_numeric(df_month['Plan'], errors='coerce').fillna(0)
-                df_month['Actual'] = pd.to_numeric(df_month['Actual'], errors='coerce').fillna(0)
+    #             # Convert numbers
+    #             df_month['Plan'] = pd.to_numeric(df_month['Plan'], errors='coerce').fillna(0)
+    #             df_month['Actual'] = pd.to_numeric(df_month['Actual'], errors='coerce').fillna(0)
                 
-                # Create Date (Assuming Year 2025)
-                # Need mapping for month number
-                month_num = list(months.keys()).index(month_name) + 1
-                dates = []
-                for day in df_month['Day']:
-                    try:
-                        dates.append(pd.Timestamp(year=2025, month=month_num, day=int(day)))
-                    except:
-                        dates.append(pd.NaT)
-                df_month['Date'] = dates
-                df_month = df_month.dropna(subset=['Date'])
+    #             # Create Date (Assuming Year 2025)
+    #             # Need mapping for month number
+    #             month_num = list(months.keys()).index(month_name) + 1
+    #             dates = []
+    #             for day in df_month['Day']:
+    #                 try:
+    #                     dates.append(pd.Timestamp(year=2025, month=month_num, day=int(day)))
+    #                 except:
+    #                     dates.append(pd.NaT)
+    #             df_month['Date'] = dates
+    #             df_month = df_month.dropna(subset=['Date'])
                 
-                processed_data.append(df_month[['Date', 'Month', 'Plan', 'Actual']])
+    #             processed_data.append(df_month[['Date', 'Month', 'Plan', 'Actual']])
                 
-            except Exception as e:
-                continue
+    #         except Exception as e:
+    #             continue
                 
-        if not processed_data:
-            return pd.DataFrame()
+    #     if not processed_data:
+    #         return pd.DataFrame()
             
-        return pd.concat(processed_data, ignore_index=True)
+    #     return pd.concat(processed_data, ignore_index=True)
         
-    except Exception as e:
-        print(f"Error loading Analisa Produksi: {e}")
-        return pd.DataFrame()
+    # except Exception as e:
+    #     print(f"Error loading Analisa Produksi: {e}")
+    #     return pd.DataFrame()
 
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_ritase():
     """Load data ritase"""
-    df = None
-    
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='Ritase')
-            except:
-                pass
-    
-    # if df is None:
-    #     local_path = load_from_local("monitoring")
-    #     if local_path:
+    # LEGACY FUNCTION DISABLED
+    return pd.DataFrame()
+    # df = None
+    # if ONEDRIVE_LINKS.get("monitoring"):
+    #     file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+    #     if file_buffer:
     #         try:
-    #             df = pd.read_excel(local_path, sheet_name='Ritase')
+    #             df = pd.read_excel(file_buffer, sheet_name='Ritase')
     #         except:
     #             pass
     
-    if df is None:
-        return pd.DataFrame()
+    # if df is None:
+    #     return pd.DataFrame()
     
-    try:
-        cols_keep = ['Tanggal', 'Shift', 'Pengawasan', 'Front B LS', 'Front B Clay', 
-                    'Front B LS MIX', 'Front C LS', 'Front C LS MIX', 'PLB LS', 
-                    'PLB SS', 'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
-                    'PLT LS MIX', 'Stockpile 6 ']
+    # try:
+    #     cols_keep = ['Tanggal', 'Shift', 'Pengawasan', 'Front B LS', 'Front B Clay', 
+    #                 'Front B LS MIX', 'Front C LS', 'Front C LS MIX', 'PLB LS', 
+    #                 'PLB SS', 'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
+    #                 'PLT LS MIX', 'Stockpile 6 ']
         
-        available_cols = [col for col in cols_keep if col in df.columns]
-        df = df[available_cols].copy()
+    #     available_cols = [col for col in cols_keep if col in df.columns]
+    #     df = df[available_cols].copy()
         
-        df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
-        df = df[df['Tanggal'].notna()]
+    #     df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
+    #     df = df[df['Tanggal'].notna()]
         
-        df = df[df['Shift'].isin([1, 2, 3, '1', '2', '3'])]
-        df['Shift'] = df['Shift'].astype(str)
+    #     df = df[df['Shift'].isin([1, 2, 3, '1', '2', '3'])]
+    #     df['Shift'] = df['Shift'].astype(str)
         
-        numeric_cols = [col for col in df.columns if col not in ['Tanggal', 'Shift', 'Pengawasan']]
-        for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    #     numeric_cols = [col for col in df.columns if col not in ['Tanggal', 'Shift', 'Pengawasan']]
+    #     for col in numeric_cols:
+    #         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        df = df.reset_index(drop=True)
-        return df
-    except:
-        return pd.DataFrame()
+    #     df = df.reset_index(drop=True)
+    #     return df
+    # except:
+    #     return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
+# @st.cache_data(ttl=CACHE_TTL)
 def load_daily_plan():
     """
-    Load data daily plan scheduling (DEBUG MODE ENABLED)
+    Load data daily plan scheduling (Redirects to DB Loader)
     """
-    df = None
-    debug_log = []
-    
-    # 0. Check Force Sync (Prioritize explicit reload)
-    force_sync = st.session_state.get('force_cloud_reload', False)
-    
-    if force_sync:
-        link = ONEDRIVE_LINKS.get("daily_plan")
-        if link:
-            try:
-                debug_log.append(f"Attempting download (Daily Plan). Link: {link[:20]}...")
-                direct_url = convert_onedrive_link(link, cache_bust=True)
-                debug_log.append(f"Converted URL (Daily Plan): {direct_url}")
-                
-                file_buffer = download_from_onedrive(link, cache_bust=True)
-                if file_buffer:
-                    st.session_state['last_update_daily_plan'] = datetime.now().strftime("%H:%M")
-                    try:
-                        df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
-                    except Exception as e:
-                        debug_log.append(f"Daily Plan Excel Read Error: {str(e)}")
-                else:
-                    debug_log.append("Daily Plan Sync failed: No buffer returned")
-            except Exception as e:
-                debug_log.append(f"Daily Plan Cloud Sync Error: {str(e)}")
+    # 0. TRY DATABASE LOAD
+    try:
+        engine = get_db_engine()
+        if engine:
+            query = "SELECT * FROM daily_plan_logs"
+            df_db = pd.read_sql(query, engine)
+            if not df_db.empty:
+                # DB has lowercase snake_case headers
+                # App expects Title Case or exact headers from Excel
+                # Map back:
+                rename_map = {
+                    'tanggal': 'Tanggal',
+                    'shift': 'Shift',
+                    'batu_kapur': 'Batu Kapur',
+                    'silika': 'Silika',
+                    'clay': 'Clay',
+                    'timbunan': 'Timbunan',
+                    'alat_muat': 'Alat Muat',
+                    'alat_angkut': 'Alat Angkut',
+                    'blok': 'Blok',
+                    'grid': 'Grid',
+                    'rom': 'ROM',
+                    'keterangan': 'Keterangan'
+                }
+                df_db = df_db.rename(columns=rename_map)
+                if 'Tanggal' in df_db.columns:
+                     df_db['Tanggal'] = pd.to_datetime(df_db['Tanggal'])
+                return df_db
+    except Exception as e:
+        debug_log.append(f"DB Load Error: {str(e)}")
 
-    # 1. Standard Cloud Load (Fallback)
-    if (df is None or df.empty) and ONEDRIVE_LINKS.get("daily_plan") and not force_sync:
-        try:
-            file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
-            if file_buffer:
-                 st.session_state['last_update_daily_plan'] = datetime.now().strftime("%H:%M")
-                 try:
-                     df = pd.read_excel(file_buffer, sheet_name='Scheduling', skiprows=1)
-                 except: pass
-        except Exception as e:
-            debug_log.append(f"Daily Plan Fallback Error: {str(e)}")
-            
-    # Save log
-    st.session_state['debug_log_daily_plan'] = debug_log
-    
     if df is None:
         return pd.DataFrame()
     
@@ -1300,289 +1308,159 @@ def load_daily_plan():
 @st.cache_data(ttl=CACHE_TTL)
 def load_realisasi():
     """Load data realisasi"""
-    df = None
-    
-    if ONEDRIVE_LINKS.get("daily_plan"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["daily_plan"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='W22 realisasi', skiprows=1)
-            except:
-                pass
-    
-    if df is None:
-        local_path = load_from_local("daily_plan")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='W22 realisasi', skiprows=1)
-            except:
-                pass
-    
-    if df is None:
-        return pd.DataFrame()
-    
+    #                  'Timbunan', 'Alat Bor', 'Alat Muat', 'Alat Angkut', 'Blok', 
+    #                  'Grid', 'ROM', 'Keterangan']
+    #     available = [c for c in cols_keep if c in df.columns]
+    #     df = df[available].copy()
+        
+    #     df = df.dropna(how='all')
+    #     df = df.reset_index(drop=True)
+        
+    #     return df
+    # except:
+    #     return pd.DataFrame()
+
+
+
+
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
+def load_daily_plan_data():
+    """
+    Load Daily Plan data from Database
+    """
     try:
-        new_cols = ['No', 'Hari', 'Tanggal', 'Week', 'Shift', 'Batu Kapur', 'Silika', 
-                    'Timbunan', 'Alat Bor', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 
-                    'ROM', 'Keterangan']
-        
-        if len(df.columns) >= len(new_cols):
-            df.columns = new_cols + list(df.columns[len(new_cols):])
-        
-        df = df.iloc[1:].copy()
-        df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
-        
-        df = df[df['Hari'].notna()]
-        df = df[df['Hari'] != 'Hari']
-        
-        cols_keep = ['Hari', 'Tanggal', 'Week', 'Shift', 'Batu Kapur', 'Silika', 
-                     'Timbunan', 'Alat Bor', 'Alat Muat', 'Alat Angkut', 'Blok', 
-                     'Grid', 'ROM', 'Keterangan']
-        available = [c for c in cols_keep if c in df.columns]
-        df = df[available].copy()
-        
-        df = df.dropna(how='all')
-        df = df.reset_index(drop=True)
-        
-        return df
-    except:
-        return pd.DataFrame()
-
-# ============================================================
-# NEW MONITORING FUNCTIONS (ADDED)
-# ============================================================
-
-@st.cache_data(ttl=CACHE_TTL)
-def load_bbm_enhanced():
-    """Load data BBM dengan kategori alat"""
-    with open(os.devnull, "w") as f:
-        f.write("Starting load_bbm_enhanced\n")
-        
-        df = load_bbm_raw() # Use raw loader foundation
-        f.write(f"Raw Shape: {df.shape}\n")
-        f.write(f"Raw Columns: {list(df.columns)}\n")
+        engine = get_db_engine() # Ensure engine is available
+        # Sort by ID ASC (Since we reversed input, ID 1 is the Latest Data)
+        query = "SELECT * FROM daily_plan_logs WHERE tanggal >= '2026-01-01' ORDER BY id ASC"
+        df = pd.read_sql(query, engine)
         
         if df.empty:
             return pd.DataFrame()
-        
-        try:
-            # 1. Clean Headers (Search for 'Alat Berat' row)
-            if 'Alat Berat' not in df.columns:
-                # Try to find header row
-                for i in range(min(5, len(df))):
-                    row_str = df.iloc[i].astype(str).str.cat(sep=' ')
-                    if 'Alat Berat' in row_str:
-                        df.columns = df.iloc[i]
-                        df = df.iloc[i+1:].reset_index(drop=True)
-                        f.write(f"Found header at row {i}\n")
-                        break
             
-            # 2. Standardize Columns
-            # Rename 'Alat Berat' to 'Unit'
-            col_map = {c: c for c in df.columns}
-            for c in df.columns:
-                if 'Alat Berat' in str(c): col_map[c] = 'Unit'
-                if 'Tipe' in str(c): col_map[c] = 'Type'
-                if 'Kategori' in str(c): col_map[c] = 'Kategori'
-                
-            df = df.rename(columns=col_map)
-            f.write(f"Renamed Columns: {list(df.columns)}\n")
-            
-            # 3. Add Kategori if missing
-            if 'Kategori' not in df.columns and 'Unit' in df.columns:
-                df['Kategori'] = df['Unit'].apply(lambda x: 
-                    'Excavator' if 'Excavator' in str(x) else 
-                    'Dump Truck' if 'Dump' in str(x) or 'SCANIA' in str(x).upper() else 
-                    'Support'
-                )
-            
-            # 4. Melt Date Columns for Analysis
-            # Identify date columns (1-31)
-            date_cols = [c for c in df.columns if str(c).strip().isdigit() and 1 <= int(str(c).strip()) <= 31]
-            f.write(f"Date Cols Found: {date_cols}\n")
-            
-            if date_cols and 'Unit' in df.columns:
-                id_vars = ['Unit']
-                if 'Kategori' in df.columns: id_vars.append('Kategori')
-                
-                df_melted = df.melt(id_vars=id_vars, value_vars=date_cols, var_name='Day', value_name='Liters')
-                f.write(f"Melted Shape: {df_melted.shape}\n")
-                
-                df_melted['Liters'] = pd.to_numeric(df_melted['Liters'], errors='coerce').fillna(0)
-                df_melted = df_melted[df_melted['Liters'] > 0]
-                f.write(f"Final Filtered Shape: {df_melted.shape}\n")
-                
-                return df_melted
-            
-            f.write("Returning original DF (Melting failed or no date cols)\n")
-            return df
-        except Exception as e:
-            f.write(f"Error: {e}\n")
-            # st.error(f"Error in load_bbm_enhanced: {e}")
-            return df
-
-
-@st.cache_data(ttl=CACHE_TTL)
-def load_bbm_detail():
-    """Load BBM dengan detail per hari (melted format)"""
-    df = load_bbm_enhanced()
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    try:
-        day_cols = [col for col in df.columns if str(col).isdigit()]
-        if not day_cols:
-            return pd.DataFrame()
+        # Rename for View Compatibility
+        rename_map = {
+            'tanggal': 'Tanggal', 'hari': 'Hari',
+            'batu_kapur': 'Batu Kapur', 'silika': 'Silika', 'clay': 'Clay', 
+            # 'timbunan': 'Timbunan', # Removed
+            'alat_muat': 'Alat Muat', 'alat_angkut': 'Alat Angkut', 
+            'blok': 'Blok', 'grid': 'Grid', 'rom': 'ROM', 'keterangan': 'Keterangan'
+        }
+        df = df.rename(columns=rename_map)
         
-        id_vars = ['No', 'Alat Berat', 'Tipe Alat']
-        if 'Kategori' in df.columns:
-            id_vars.append('Kategori')
-        
-        df_melted = df.melt(
-            id_vars=id_vars,
-            value_vars=day_cols,
-            var_name='Tanggal',
-            value_name='BBM_Liter'
-        )
-        
-        df_melted['Tanggal'] = pd.to_numeric(df_melted['Tanggal'], errors='coerce')
-        df_melted['BBM_Liter'] = pd.to_numeric(df_melted['BBM_Liter'], errors='coerce').fillna(0)
-        df_melted = df_melted[df_melted['BBM_Liter'] > 0]
-        
-        return df_melted
-    except:
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=CACHE_TTL)
-def load_ritase_enhanced():
-    """Load data ritase dengan Total_Ritase dan Bulan"""
-    df = load_ritase()
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    try:
-        df['Shift'] = pd.to_numeric(df['Shift'], errors='coerce').fillna(1).astype(int)
-        
-        front_cols = ['Front B LS', 'Front B Clay', 'Front B LS MIX', 
-                     'Front C LS', 'Front C LS MIX', 'PLB LS', 'PLB SS', 
-                     'PLT SS', 'PLT MIX', 'Timbunan', 'Stockpile 6  SS', 
-                     'PLT LS MIX', 'Stockpile 6 ']
-        
-        available_fronts = [c for c in front_cols if c in df.columns]
-        df['Total_Ritase'] = df[available_fronts].sum(axis=1)
-        
+        # Ensure Date
         if 'Tanggal' in df.columns:
-            df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-            df['Bulan'] = df['Tanggal'].dt.month
-            df['Bulan_Nama'] = df['Tanggal'].dt.strftime('%B')
+            df['Tanggal'] = pd.to_datetime(df['Tanggal'])
+        
+        # Reorder columns: Hari first
+        cols = [c for c in ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan'] if c in df.columns]
+        df = df[cols]
         
         return df
-    except:
-        return df
-
-
-@st.cache_data(ttl=CACHE_TTL)
-def load_ritase_by_front():
-    """Load ritase aggregated by front/location"""
-    df = load_ritase_raw() # Use raw
-    
-    if df.empty:
+    except Exception as e:
+        print(f"Error loading Daily Plan from DB: {e}")
         return pd.DataFrame()
     
+
+
+
+
+
+
+# REFACTOR: Duplicate load_ritase_enhanced removed. 
+# The correct version with DB logic is defined above at line 1066.
+
+
+
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
+def load_ritase_by_front():
+    """
+    Load ritase aggregated by front/location.
+    OPTIMIZED: Uses load_produksi (DB) instead of downloading raw Ritase sheet.
+    """
     try:
-        # 1. Header Detection
-        if 'Front' not in str(df.columns):
-            for i in range(min(5, len(df))):
-                row_str = df.iloc[i].astype(str).str.cat(sep=' ')
-                if 'Front' in row_str or 'Shift' in row_str:
-                    df.columns = df.iloc[i]
-                    df = df.iloc[i+1:].reset_index(drop=True)
-                    break
-                    
-        # 2. Identify Front Columns
-        # Filter out metadata
-        exclude = ['Tanggal', 'Shift', 'Pengawasan', 'Total', 'No', 'Day', 'Date', 'Month', 'Year', 'Bulan']
-        front_cols = [c for c in df.columns if c not in exclude and not str(c).startswith('Unnamed')]
-        
-        # 3. Aggregate
-        # Convert to numeric first
-        for c in front_cols:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        df_prod = load_produksi()
+        if df_prod.empty:
+             return pd.DataFrame()
+             
+        # Aggregate Rit by Front
+        if 'Front' in df_prod.columns and 'Rit' in df_prod.columns:
+            # Clean Front name
+            df_prod['Front'] = df_prod['Front'].astype(str).str.strip()
             
-        totals = df[front_cols].sum().reset_index()
-        totals.columns = ['Front', 'Total_Ritase']
-        totals = totals[totals['Total_Ritase'] > 0]
-        totals = totals.sort_values('Total_Ritase', ascending=False)
-        
-        return totals
+            # Group
+            totals = df_prod.groupby('Front')['Rit'].sum().reset_index()
+            totals.columns = ['Front', 'Total_Ritase']
+            totals = totals[totals['Total_Ritase'] > 0]
+            totals = totals.sort_values('Total_Ritase', ascending=False)
+            return totals
+            
+        return pd.DataFrame()
     except Exception as e:
-        # st.error(f"Error in Ritase: {e}")
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=CACHE_TTL)
 def load_tonase():
     """Load data tonase per jam"""
-    df = None
+    # LEGACY FUNCTION DISABLED
+    return pd.DataFrame()
+    # df = None
     
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='Tonase', header=1)
-            except:
-                pass
-    
-    # if df is None:
-    #     local_path = load_from_local("monitoring")
-    #     if local_path:
+    # if ONEDRIVE_LINKS.get("monitoring"):
+    #     file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+    #     if file_buffer:
     #         try:
-    #             df = pd.read_excel(local_path, sheet_name='Tonase', header=1)
+    #             df = pd.read_excel(file_buffer, sheet_name='Tonase', header=1)
     #         except:
     #             pass
     
-    if df is None:
-        return pd.DataFrame()
+    # # if df is None:
+    # #     local_path = load_from_local("monitoring")
+    # #     if local_path:
+    # #         try:
+    # #             df = pd.read_excel(local_path, sheet_name='Tonase', header=1)
+    # #         except:
+    # #             pass
     
-    try:
-        # Safety: Rename first column to Tanggal
-        if len(df.columns) > 0:
-             df = df.rename(columns={df.columns[0]: 'Tanggal', df.columns[1]: 'Ritase'})
+    # if df is None:
+    #     return pd.DataFrame()
+    
+    # try:
+    #     # Safety: Rename first column to Tanggal
+    #     if len(df.columns) > 0:
+    #          df = df.rename(columns={df.columns[0]: 'Tanggal', df.columns[1]: 'Ritase'})
 
-        # Filter repeated headers (Fix DateParseError)
-        # Filter repeated headers (Fix DateParseError)
-        if 'Tanggal' in df.columns:
-            df = df[df['Tanggal'].astype(str).str.strip() != 'Tanggal']
+    #     # Filter repeated headers (Fix DateParseError)
+    #     # Filter repeated headers (Fix DateParseError)
+    #     if 'Tanggal' in df.columns:
+    #         df = df[df['Tanggal'].astype(str).str.strip() != 'Tanggal']
             
-            # Handle Excel Serial Dates
-            # Force numeric first
-            df['Tanggal_Num'] = pd.to_numeric(df['Tanggal'], errors='coerce')
+    #         # Handle Excel Serial Dates
+    #         # Force numeric first
+    #         df['Tanggal_Num'] = pd.to_numeric(df['Tanggal'], errors='coerce')
             
-            # If successful (not all NaNs), use it
-            if df['Tanggal_Num'].notna().any():
-                df['Tanggal'] = pd.to_datetime(df['Tanggal_Num'], unit='D', origin='1899-12-30')
-            else:
-                df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+    #         # If successful (not all NaNs), use it
+    #         if df['Tanggal_Num'].notna().any():
+    #             df['Tanggal'] = pd.to_datetime(df['Tanggal_Num'], unit='D', origin='1899-12-30')
+    #         else:
+    #             df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
                 
-            df = df[df['Tanggal'].notna()]
+    #         df = df[df['Tanggal'].notna()]
         
-        hour_cols = [col for col in df.columns if '-' in str(col) and col not in ['Tanggal', 'Ritase']]
-        for col in hour_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    #     hour_cols = [col for col in df.columns if '-' in str(col) and col not in ['Tanggal', 'Ritase']]
+    #     for col in hour_cols:
+    #         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        if 'Total' in df.columns:
-            df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
+    #     if 'Total' in df.columns:
+    #         df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
         
-        if 'Tanggal' in df.columns:
-            df['Bulan'] = df['Tanggal'].dt.month
+    #     if 'Tanggal' in df.columns:
+    #         df['Bulan'] = df['Tanggal'].dt.month
             
-        df = df.reset_index(drop=True)
-        return df
-    except:
-        return pd.DataFrame()
+    #     df = df.reset_index(drop=True)
+    #     return df
+    # except:
+    #     return pd.DataFrame()
 
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -1609,161 +1487,26 @@ def load_tonase_hourly():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_analisa_produksi_all():
-    """Load semua data analisa produksi (Jan-Des)"""
-    bulan_map = {
-        'Januari': 0, 'Februari': 5, 'Maret': 10, 'April': 15,
-        'Mei': 20, 'Juni': 25, 'Juli': 30, 'Agustus': 35,
-        'September': 40, 'Oktober': 45, 'November': 50, 'Desember': 55
-    }
-    
-    df = None
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='Analisa Produksi')
-            except:
-                pass
-    
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            print(f"DEBUG Loading Analisa from: {local_path}")
-            try:
-                df = pd.read_excel(local_path, sheet_name='Analisa Produksi')
-            except Exception as e:
-                print(f"DEBUG Error loading Analisa: {e}")
-                pass
-    
-    if df is None:
-        print("DEBUG Analisa df is None")
-        return pd.DataFrame()
-    
+    """Load Target/Plan data from Database (migrated from Analisa Produksi)"""
     try:
-        with open(os.devnull, "w") as f:
-            f.write("Starting load_analisa_produksi_all\n")
-            f.write(f"Columns: {list(df.columns)}\n")
-            
-            # Dynamic Header Scanning for Analysis Production
-            # Row 0 contains headers like 'Januari 2025', 'Februari 2025', ... 'Januari 2026'
-            
-            # Read header row (Row 0) to identify blocks
-            df_header = df.iloc[0:1]
-            f.write(f"Row 0 samples: {df_header.iloc[0, :10].tolist()}\n")
-            
-            block_starts = []
-            # Typo handling
-            months_indo = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
-                           'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
-            months_indo_extended = months_indo + ['Februai']
-        
-            for col_idx, col_name in enumerate(df.columns):
-                val = str(col_name).strip()
-                f.write(f"Scanning col {col_idx}: {val}\n")
-                # Check matches
-                for m in months_indo_extended:
-                    if m in val:
-                        f.write(f"Match found: {m} in {val}\n")
-                        year = 2026
-                        if '2025' in val: year = 2025
-                        
-                        # Map typo to real month
-                        real_month = 'Februari' if m == 'Februai' else m
-                        block_starts.append((col_idx, real_month, val, year))
-                        break
-        
-            f.write(f"Block Starts: {block_starts}\n")
-            all_data = []
-            
-            for start_col, month_name, header_name, year in block_starts:
-                try:
-                    if start_col + 3 >= len(df.columns):
-                        continue
-                        
-                    # Skip sub-header row (Row 0 is sub-header 'Tanggal')
-                    # DF Index 0: Subheader
-                    # DF Index 1: Data
-                    # Use iloc[1:33] to capture data starting from Row 1
-                    df_block = df.iloc[1:33, start_col:start_col+4].copy()
-                    df_block.columns = ['Day', 'Plan', 'Actual', 'Ach']
-                    
-                    # Check if Day column is empty or contains "Tanggal"
-                    df_block = df_block[df_block['Day'].astype(str) != 'Tanggal']
-                    df_block = df_block[df_block['Day'].notna()]
-                    
-                    f.write(f"Block shape after filter: {df_block.shape}\n")
-                    if not df_block.empty:
-                        f.write(f"Head: {df_block.head().to_string()}\n")
-                    else:
-                        f.write(f"Block empty after filter. Raw head: {df.iloc[1:5, start_col].tolist()}\n")
-                        
-                    if df_block.empty:
-                        continue
-                    
-                    # Determine parsing strategy
-                    first_val = df_block['Day'].iloc[0]
-                    is_full_date = False
-                    
-                    if isinstance(first_val, (pd.Timestamp, datetime)):
-                        is_full_date = True
-                    elif isinstance(first_val, (int, float)) and first_val > 31:
-                        is_full_date = True
-                    
-                    dates = []
-                    if is_full_date:
-                        # Use the column directly, parse if needed
-                        if pd.api.types.is_numeric_dtype(df_block['Day']):
-                            dates = pd.to_datetime(df_block['Day'], unit='D', origin='1899-12-30').tolist()
-                        else:
-                            dates = pd.to_datetime(df_block['Day'], errors='coerce').tolist()
-                    else:
-                        # Construct from Day number
-                        month_num = months_indo.index(month_name) + 1
-                        for day in df_block['Day']:
-                            try:
-                                d = int(day)
-                                dates.append(pd.Timestamp(year=year, month=month_num, day=d))
-                            except:
-                                dates.append(pd.NaT)
-                    
-                    df_block['Date'] = dates
-                    df_block['Month'] = month_name
-                    df_block['Year'] = year
-                    
-                    df_block = df_block.rename(columns={
-                        'Date': 'Tanggal',
-                        'Plan': 'Plan', 
-                        'Actual': 'Aktual',
-                        'Ach': 'Ketercapaian'
-                    })
-                    
-                    df_block = df_block.dropna(subset=['Tanggal'])
-                    
-                    # Convert numerics
-                    for col in ['Plan', 'Aktual', 'Ketercapaian']:
-                        df_block[col] = pd.to_numeric(df_block[col], errors='coerce').fillna(0)
-                    
-                    all_data.append(df_block[['Tanggal', 'Bulan', 'Tahun', 'Plan', 'Aktual', 'Ketercapaian']] 
-                                    if 'Bulan' in df_block.columns else 
-                                    df_block[['Tanggal', 'Month', 'Year', 'Plan', 'Aktual', 'Ketercapaian']])
-                    
-                except Exception as e:
-                    # print(f"Error processing block {header_name}: {e}")
-                    continue
-                    
-            if all_data:
-                final_df = pd.concat(all_data, ignore_index=True)
-                # Rename Month/Year to standard if needed or keep helper cols
-                final_df = final_df.rename(columns={'Month': 'Bulan', 'Year': 'Tahun'})
-                return final_df
-                
-            return pd.DataFrame()
-
+        engine = get_db_engine()
+        if engine:
+            query = "SELECT * FROM target_logs ORDER BY date ASC"
+            df_db = pd.read_sql(query, engine)
+            if not df_db.empty:
+                rename_map = {'date': 'Date', 'plan': 'Plan'}
+                df_db = df_db.rename(columns=rename_map)
+                if 'Date' in df_db.columns: df_db['Date'] = pd.to_datetime(df_db['Date'])
+                st.session_state['last_update_targets'] = "Database"
+                return df_db
     except Exception as e:
-        print(f"Error loading Analisa Produksi: {e}")
-        return pd.DataFrame()
+        print(f"Target DB Error: {e}")
+        
+    # FORCE STOP if DB missing - DO NOT fall back to Excel Download for Speed
+    return pd.DataFrame()
+
 
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -1873,81 +1616,67 @@ def parse_durasi_value(value):
 @st.cache_data(ttl=CACHE_TTL)
 def load_gangguan_monitoring():
     """Load gangguan dari sheet Gangguan di file Monitoring"""
-    df = None
+    # LEGACY FUNCTION DISABLED
+    return pd.DataFrame()
+    # df = None
     
-    if ONEDRIVE_LINKS.get("monitoring"):
-        file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
-        if file_buffer:
-            try:
-                df = pd.read_excel(file_buffer, sheet_name='Gangguan')
-            except:
-                pass
+    # if ONEDRIVE_LINKS.get("monitoring"):
+    #     file_buffer = download_from_onedrive(ONEDRIVE_LINKS["monitoring"])
+    #     if file_buffer:
+    #         try:
+    #             df = pd.read_excel(file_buffer, sheet_name='Gangguan')
+    #         except:
+    #             pass
     
-    if df is None:
-        local_path = load_from_local("monitoring")
-        if local_path:
-            try:
-                df = pd.read_excel(local_path, sheet_name='Gangguan')
-            except:
-                pass
+    # if df is None:
+    #     local_path = load_from_local("monitoring")
+    #     if local_path:
+    #         try:
+    #             df = pd.read_excel(local_path, sheet_name='Gangguan')
+    #         except:
+    #             pass
     
-    if df is None:
-        return pd.DataFrame()
+    # if df is None:
+    #     return pd.DataFrame()
     
-    try:
-        all_data = []
-        bulan_cols = ['Tanggal', 'Week', 'Shift', 'Start', 'End', 'Durasi', 'Kendala', 'Masalah']
+    # try:
+    #     all_data = []
+    #     bulan_cols = ['Tanggal', 'Week', 'Shift', 'Start', 'End', 'Durasi', 'Kendala', 'Masalah']
         
-        for i in range(12):
-            start_col = i * 9
-            try:
-                section = df.iloc[:, start_col:start_col+8].copy()
-                if section.shape[1] < 8:
-                    continue
-                section.columns = bulan_cols
-                section = section[section['Tanggal'].notna()]
-                section = section[section['Durasi'].notna()]
-                section['Tanggal'] = pd.to_datetime(section['Tanggal'], errors='coerce')
+    #     for i in range(12):
+    #         start_col = i * 9
+    #         try:
+    #             section = df.iloc[:, start_col:start_col+8].copy()
+    #             if section.shape[1] < 8:
+    #                 continue
+    #             section.columns = bulan_cols
+    #             section = section[section['Tanggal'].notna()]
+    #             section = section[section['Durasi'].notna()]
+    #             section['Tanggal'] = pd.to_datetime(section['Tanggal'], errors='coerce')
                 
-                # FIX: Use safe Durasi parser to prevent overflow
-                section['Durasi'] = section['Durasi'].apply(parse_durasi_value)
+    #             # FIX: Use safe Durasi parser to prevent overflow
+    #             section['Durasi'] = section['Durasi'].apply(parse_durasi_value)
                 
-                section['Shift'] = pd.to_numeric(section['Shift'], errors='coerce').fillna(1)
-                section = section[section['Tanggal'].notna()]
-                section = section[section['Durasi'] > 0]
-                if not section.empty:
-                    all_data.append(section)
-            except:
-                continue
+    #             section['Shift'] = pd.to_numeric(section['Shift'], errors='coerce').fillna(1)
+    #             section = section[section['Tanggal'].notna()]
+    #             section = section[section['Durasi'] > 0]
+    #             if not section.empty:
+    #                 all_data.append(section)
+    #         except:
+    #             continue
         
-        if all_data:
-            result = pd.concat(all_data, ignore_index=True)
-            result['Bulan'] = result['Tanggal'].dt.month
-            return result
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
+    #     if all_data:
+    #         result = pd.concat(all_data, ignore_index=True)
+    #         result['Bulan'] = result['Tanggal'].dt.month
+    #         return result
+    #     return pd.DataFrame()
+    # except:
+    #     return pd.DataFrame()
 
 
 # ============================================================
 # SUMMARY FUNCTIONS FOR MONITORING
 # ============================================================
-
-def get_bbm_summary(df_bbm):
-    """Calculate BBM summary statistics"""
-    if df_bbm is None or df_bbm.empty:
-        return {'total_bbm': 0, 'avg_per_unit': 0, 'excavator_total': 0, 'dt_total': 0}
-    
-    total_bbm = df_bbm['Total'].sum() if 'Total' in df_bbm.columns else 0
-    avg_per_unit = df_bbm['Total'].mean() if 'Total' in df_bbm.columns else 0
-    
-    excavator_total = dt_total = 0
-    if 'Kategori' in df_bbm.columns:
-        excavator_total = df_bbm[df_bbm['Kategori'] == 'Excavator']['Total'].sum()
-        dt_total = df_bbm[df_bbm['Kategori'] == 'Dump Truck']['Total'].sum()
-    
-    return {'total_bbm': total_bbm, 'avg_per_unit': round(avg_per_unit, 0), 
-            'excavator_total': excavator_total, 'dt_total': dt_total}
 
 
 def get_ritase_summary(df_ritase):
@@ -1989,7 +1718,7 @@ def get_production_summary(df_prod):
 # These functions provide direct access to Excel sheets
 # Used by views/monitoring.py to maintain 0% visual change
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_stockpile_hopper():
     """
     Load and process Stockpile Hopper data based on Transactional Structure.
@@ -2001,171 +1730,29 @@ def load_stockpile_hopper():
         df = None
         debug_log = []
         
-        # 1. FORCE CLOUD SYNC CHECK
-        force_sync = st.session_state.get('force_cloud_reload', False)
-        
-        if force_sync:
-            link = ONEDRIVE_LINKS.get("monitoring")
-            if link:
-                try:
-                    debug_log.append(f"Attempting download (Stockpile). Link: {link[:20]}...")
-                    direct_url = convert_onedrive_link(link, cache_bust=True)
-                    debug_log.append(f"Converted URL (Stockpile): {direct_url}")
-                    
-                    file_buffer = download_from_onedrive(link, cache_bust=True)
-                    if file_buffer:
-                        source = file_buffer
-                        # RECORD TIMESTAMP for Debugging
-                        st.session_state['last_update_stockpile'] = datetime.now().strftime("%H:%M:%S")
-                    else:
-                        debug_log.append("Stockpile Sync failed: No buffer returned")
-                except Exception as e:
-                    debug_log.append(f"Stockpile Cloud Sync Error: {e}")
-        
-        # 2. Standard Path Resolution (Cloud Only)
-        if not source:
-             link = ONEDRIVE_LINKS.get("monitoring")
-             if link:
-                 try:
-                     # Add tracing for fallback too if debug mode needed, but keep simple
-                     source = download_from_onedrive(link)
-                     if source:
-                         # Record timestamp for standard load too
-                         st.session_state['last_update_stockpile'] = datetime.now().strftime("%H:%M:%S")
-                 except Exception as e:
-                     debug_log.append(f"Stockpile Fallback Error: {e}")
-        
-        # Save log
-        st.session_state['debug_log_stockpile'] = debug_log
-        
-        if source:
-            # 1. Read a chunk of rows to find the header (e.g., first 5000 rows)
-            # User screenshot shows header at ~3400, so we need a deep scan.
-            # Handle source types (BytesIO vs FilePath)
-            if hasattr(source, 'seek'):
-                source.seek(0)
-                
-            df_raw = pd.read_excel(source, sheet_name='Stockpile Hopper', header=None, nrows=5000)
-            
-            header_idx = None
-            for i in range(len(df_raw)):
-                row_str = df_raw.iloc[i].astype(str).str.cat(sep=' ').lower()
-                # Look for signature columns
-                if 'date' in row_str and 'dumping' in row_str and 'ritase' in row_str:
-                    header_idx = i
-                    break
-            
-            if header_idx is not None:
-                # Reload with correct header (Read FULL file)
-                # Note: header_idx is 0-based.
-                if hasattr(source, 'seek'):
-                    source.seek(0)
-                df = pd.read_excel(source, sheet_name='Stockpile Hopper', header=header_idx)
-                
-                # Preserve Excel Row Order
-                df['Row_Order'] = df.index
-                
-                # Standardize Column Names
-                rename_dict = {}
-                for col in df.columns:
-                    lower_col = str(col).lower().strip()
-                    if 'date' == lower_col or 'tanggal' == lower_col:
-                        rename_dict[col] = 'Tanggal'
-                    elif 'time' in lower_col or 'jam' in lower_col:
-                        rename_dict[col] = 'Jam_Range'
-                    elif 'shift' in lower_col:
-                        rename_dict[col] = 'Shift'
-                    
-                    # Mapping based on User Request
-                    # Dumping -> Loader
-                    elif 'dumping' in lower_col: 
-                        rename_dict[col] = 'Loader'
-                    
-                    # Old "Ritase" (Hauler) -> Now "Unit"
-                    # If header says "Unit", map to Unit. If header says "Ritase" but contains text, map to Unit?
-                    # Safer: Look for specific keywords if header is ambiguous, but user said header CHANGED.
-                    # Let's assume user renamed header to "Unit" for Hauler.
-                    elif 'unit' == lower_col: 
-                        rename_dict[col] = 'Unit'
-                    
-                    # Old "Rit" -> Now "Ritase"
-                    elif 'ritase' == lower_col:
-                        # Ambiguity: Old file "Ritase" was Hauler. New file "Ritase" is Count.
-                        # We need to distinguish based on content or context?
-                        # User said "Ritase di ganti menjadi Unit" (so old Ritase is gone/renamed)
-                        # "Rit diganti menjadi Ritase" (so Ritase is now the count)
-                        # So if we see "Ritase", it is likely the COUNT.
-                        rename_dict[col] = 'Ritase'
-                    
-                    elif 'rit' == lower_col:
-                        rename_dict[col] = 'Ritase'
-                    
-                    # Legacy Fallback (if user didn't actually change file yet or mixed)
-                    elif 'hauler' in lower_col:
-                         rename_dict[col] = 'Unit'
+        # 0. TRY DATABASE LOAD
+        try:
+            engine = get_db_engine()
+            if engine:
+                # OPTIMIZED: Filter only 2026+ data
+                query = "SELECT * FROM stockpile_logs WHERE date >= '2026-01-01' ORDER BY created_at DESC, id DESC"
+                df_db = pd.read_sql(query, engine)
+                if not df_db.empty:
+                    rename_map = {
+                        'date': 'Tanggal', 'time': 'Jam', 'shift': 'Shift',
+                        'dumping': 'Dumping', 'unit': 'Unit', 'ritase': 'Ritase'
+                    }
+                    df_db = df_db.rename(columns=rename_map)
+                    if 'Tanggal' in df_db.columns: df_db['Tanggal'] = pd.to_datetime(df_db['Tanggal'])
+                    st.session_state['last_update_stockpile'] = "Database"
+                    return df_db
+        except Exception as e:
+            debug_log.append(f"DB Load Error: {str(e)}")
 
-                df = df.rename(columns=rename_dict)
-                
-                # Check for "Ritase vs Unit" swap ambiguity
-                # If we mapped 'Ritase' -> 'Ritase' (Count), verify it's numeric.
-                # If we mapped 'Unit' -> 'Unit', verify it's text.
-                
-                # Filter valid rows
-                if 'Tanggal' in df.columns:
-
-                    # 1. Parse Date (Excel Serial or String)
-                    df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
-                    df = df[df['Tanggal'].notna()]
-                    
-                    # Convert to datetime for filtering
-                    df['Tanggal'] = pd.to_datetime(df['Tanggal'])
-
-                    # CRITICAL: Filter for 2026 data and beyond
-                    # User request: "semua data yang dari 2026 dan seterusnya"
-                    df = df[df['Tanggal'] >= pd.Timestamp('2026-01-01')]
-                    
-                    # 2. Parse Time (Jam_Range like "07:00-08:00") -> Extract Starting Hour
-                    def extract_hour(val):
-                        if pd.isna(val): return 0
-                        s = str(val).strip()
-                        if '-' in s:
-                            start_time = s.split('-')[0]
-                            if ':' in start_time:
-                                try:
-                                    return int(start_time.split(':')[0])
-                                except:
-                                    return 0
-                        return 0
-                        
-                    if 'Jam_Range' in df.columns:
-                        df['Jam'] = df['Jam_Range'].apply(extract_hour)
-                    else:
-                        df['Jam'] = 0
-                        
-                    # 3. Numeric Ritase (Volume)
-                    if 'Ritase' in df.columns:
-                        df['Ritase'] = pd.to_numeric(df['Ritase'], errors='coerce').fillna(0)
-                        # Ensure no legacy 'Rit' column confuses things
-                        df['Rit'] = df['Ritase'] # Keep alias for backward compatibility or rename throughout? 
-                        # Better to rename 'Rit' to 'Ritase' throughout the app. 
-                        # But views/process.py uses 'Rit'. I should update that too.
-                    else:
-                        df['Ritase'] = 0
-                        df['Rit'] = 0 # Fallback
-                    
-                    # 4. Fill text defaults
-                    if 'Loader' in df.columns: df['Loader'] = df['Loader'].fillna('Unknown') # Was Unit
-                    if 'Unit' in df.columns: df['Unit'] = df['Unit'].fillna('Unknown') # Was Hauler
-
-                    return df
-
-            return pd.DataFrame()
-            
-    except Exception as e:
-        # debug_log.append(f"Error loading Stockpile Hopper: {e}") # Scope issue if defined inside try? No, defined at top.
-        # But wait, debug_log is inside local scope? Yes.
-        print(f"Error loading Stockpile Hopper: {e}")
-        return pd.DataFrame()
+    except Exception:
+        pass
+    
+    # FORCE STOP if DB Logic fails - Prevent Slow Cloud Fallback
     return pd.DataFrame()
 
 
@@ -2185,27 +1772,23 @@ def load_raw_from_cloud(sheet_name, header=0):
             pass
     return pd.DataFrame()
 
-@st.cache_data(ttl=CACHE_TTL)
-def load_bbm_raw():
-    """Load BBM sheet directly (Raw) - Cloud Only"""
-    return load_raw_from_cloud('BBM')
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_ritase_raw():
     """Load Ritase sheet directly (Raw) - Cloud Only"""
     return load_raw_from_cloud('Ritase')
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_analisa_produksi_raw():
     """Load Analisa Produksi sheet directly - Cloud Only"""
     return load_raw_from_cloud('Analisa Produksi')
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_gangguan_raw():
     """Load Gangguan sheet directly - Cloud Only"""
     return load_raw_from_cloud('Gangguan')
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_tonase_raw():
     """Load Tonase sheet directly - Cloud Only"""
     try:
@@ -2225,7 +1808,7 @@ def load_tonase_raw():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_shipping_data():
     """
     Load data pengiriman from 'TONASE PENGIRIMAN ' sheet.
@@ -2234,6 +1817,44 @@ def load_shipping_data():
     """
     df = None
     debug_log = []
+    
+    # 0. TRY DATABASE LOAD
+    try:
+        engine = get_db_engine()
+        if engine:
+            # Sort by ID ASC (Oldest First)
+            # OPTIMIZED: Filter only 2026+ data
+            # Select only needed columns (exclude id, created_at)
+            query = "SELECT tanggal, shift, ap_ls, ap_ls_mk3, ap_ss, total_ls, total_ss FROM shipping_logs WHERE tanggal >= '2026-01-01' ORDER BY id ASC"
+            df_db = pd.read_sql(query, engine)
+            if not df_db.empty:
+                 # Rename only essential UI columns (Date/Shift), keep metrics as DB names per user request
+                 rename_map = {
+                    'tanggal': 'Date', 
+                    'shift': 'Shift'
+                    # Metrics: ap_ls, ap_ls_mk3, ap_ss, total_ls, total_ss kept as is (lowercase)
+                 }
+                 df_db = df_db.rename(columns=rename_map)
+                 if 'Date' in df_db.columns: df_db['Date'] = pd.to_datetime(df_db['Date'])
+                 
+                 # Quantity calculation restored for Global Logic (Dashboard view needs it)
+                 # But will be hidden in Shipping Table View
+                 if 'total_ls' in df_db.columns and 'total_ss' in df_db.columns:
+                     df_db['Quantity'] = df_db['total_ls'] + df_db['total_ss']
+                 else:
+                     # Fallback to components
+                     c_list = ['ap_ls', 'ap_ls_mk3', 'ap_ss']
+                     for c in c_list: 
+                         if c not in df_db.columns: df_db[c] = 0
+                     df_db['Quantity'] = df_db['ap_ls'] + df_db['ap_ls_mk3'] + df_db['ap_ss']
+                 
+            st.session_state['last_update_shipping'] = "Database"
+            return df_db
+    except Exception as e:
+        debug_log.append(f"Shipping DB Query Error: {e}")
+                 
+    # FORCE STOP if DB Logic fails - Prevent Slow Cloud Fallback
+    return pd.DataFrame()
     
     # 0. CHECK FORCE SYNC
     force_sync = st.session_state.get('force_cloud_reload', False)
@@ -2391,3 +2012,79 @@ def load_shipping_data():
     except Exception as e:
         print(f"Error loading shipping: {e}")
         return pd.DataFrame()
+
+# ============================================================
+# OPTIMIZED SQL LOADERS (AGGREGATION)
+# ============================================================
+
+@st.cache_data(ttl=CACHE_TTL)
+def get_filter_options():
+    """
+    Get distinct filter options directly from SQL.
+    Super fast (< 0.1s) even for 1 million rows.
+    """
+    options = {
+        'shift': [],
+        'front': [],
+        'excavator': [],
+        'material': []
+    }
+    
+    try:
+        engine = get_db_engine()
+        if engine:
+            with engine.connect() as conn:
+                from sqlalchemy import text
+                
+                # 1. Shifts
+                try:
+                    res_shift = conn.execute(text("SELECT DISTINCT shift FROM production_logs ORDER BY shift")).fetchall()
+                    options['shift'] = [str(row[0]) for row in res_shift if row[0] is not None]
+                except:
+                    options['shift'] = ["Shift 1", "Shift 2"]
+
+                # 2. Fronts (Active Only - appearing in 2026)
+                res_front = conn.execute(text("SELECT DISTINCT front FROM production_logs WHERE date >= '2026-01-01' ORDER BY front")).fetchall()
+                options['front'] = [row[0] for row in res_front if row[0] is not None]
+                
+                # 3. Excavators
+                res_exca = conn.execute(text("SELECT DISTINCT excavator FROM production_logs WHERE date >= '2026-01-01' ORDER BY excavator")).fetchall()
+                options['excavator'] = [row[0] for row in res_exca if row[0] is not None]
+                
+                # 4. Material
+                res_mat = conn.execute(text("SELECT DISTINCT commodity FROM production_logs WHERE date >= '2026-01-01' ORDER BY commodity")).fetchall()
+                options['material'] = [row[0] for row in res_mat if row[0] is not None]
+                
+    except Exception as e:
+        print(f"Filter Load Error: {e}")
+        
+    return options
+
+@st.cache_data(ttl=CACHE_TTL)
+def get_production_kpi_summary(start_date=None, end_date=None):
+    """
+    Calculate KPIs directly in SQL. 
+    Returns: (Total Tonnase, Total Rit, Last Date)
+    """
+    try:
+        engine = get_db_engine()
+        if engine:
+             # Basic SQL construction
+             where_clause = "WHERE date >= '2026-01-01'"
+             if start_date and end_date:
+                 where_clause += f" AND date BETWEEN '{start_date}' AND '{end_date}'"
+                 
+             query = f"""
+             SELECT 
+                SUM(tonnase) as total_ton, 
+                SUM(rit) as total_rit,
+                MAX(date) as last_date
+             FROM production_logs 
+             {where_clause}
+             """
+             df = pd.read_sql(query, engine)
+             if not df.empty:
+                 return df.iloc[0]
+    except Exception as e:
+        print(f"KPI Query Error: {e}")
+    return pd.Series({'total_ton': 0, 'total_rit': 0, 'last_date': None})

@@ -13,7 +13,6 @@ from .data_loader import (
     
     # Original loaders
     load_produksi,
-    load_bbm,
     load_gangguan,
     load_gangguan_all,
     get_gangguan_summary,
@@ -23,8 +22,6 @@ from .data_loader import (
     load_realisasi,
     
     # NEW Monitoring loaders
-    load_bbm_enhanced,
-    load_bbm_detail,
     load_ritase_enhanced,
     load_ritase_by_front,
     load_tonase,
@@ -34,7 +31,6 @@ from .data_loader import (
     load_gangguan_monitoring,
     
     # NEW Summary functions
-    get_bbm_summary,
     get_ritase_summary,
     get_production_summary,
 )
@@ -54,7 +50,6 @@ __all__ = [
     
     # Original Data Loaders
     'load_produksi',
-    'load_bbm',
     'load_gangguan',
     'load_gangguan_all',
     'get_gangguan_summary',
@@ -64,8 +59,6 @@ __all__ = [
     'load_realisasi',
     
     # NEW Monitoring Loaders
-    'load_bbm_enhanced',
-    'load_bbm_detail',
     'load_ritase_enhanced',
     'load_ritase_by_front',
     'load_tonase',
@@ -75,7 +68,6 @@ __all__ = [
     'load_gangguan_monitoring',
     
     # NEW Summary Functions
-    'get_bbm_summary',
     'get_ritase_summary',
     'get_production_summary',
 ]

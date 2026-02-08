@@ -57,13 +57,33 @@ def render_sidebar():
             
         # Unified Sync Button (Professional Single-Click Action)
         if st.button("🔄 Sync & Refresh Data", use_container_width=True, type="primary", help="Ambil data terbaru dari OneDrive dan perbarui tampilan"):
-            st.session_state.force_cloud_reload = True
-            st.cache_data.clear()
-            st.cache_resource.clear()
-            st.toast("Syncing data from Cloud...", icon="☁️")
-            import time
-            time.sleep(1) # Give it a moment to clear
-            st.rerun()
+            with st.status("🔄 Sinkronisasi Data OneDrive...", expanded=True) as status:
+                st.write("Menghubungkan ke Database...")
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                
+                try:
+                    from utils.sync_manager import sync_all_data
+                    st.write("📥 Mengunduh & Memperbarui Data...")
+                    
+                    report = sync_all_data()
+                    
+                    for module, result in report.items():
+                        if "✅" in result:
+                            st.write(f"{module}: {result}")
+                        else:
+                            st.write(f"{module}: {result}")
+                            
+                    status.update(label="✅ Sinkronisasi Selesai!", state="complete", expanded=False)
+                    st.toast("Data Berhasil Diperbarui!", icon="✅")
+                    
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+                    
+                except Exception as e:
+                    status.update(label="❌ Sinkronisasi Gagal", state="error")
+                    st.error(f"Error: {str(e)}")
             
         try:
             from datetime import datetime
@@ -85,7 +105,8 @@ def render_sidebar():
         # 1. Date Range
         from datetime import date
         today = date.today()
-        # Default start date: Jan 1, 2026 as per user request
+        # Default start date: Jan 1, 2026 (Safe default since data ends in Jan 26)
+        # Optimized loaders handle this range easily now.
         default_start = date(2026, 1, 1)
         
         # Initialize session state for filters if not exists
@@ -100,9 +121,9 @@ def render_sidebar():
 
         with st.expander("🔍 Global Filters", expanded=True):
             # Reset Button
-            if st.button("♻️ Reset Filter", use_container_width=True, help="Kembalikan filter ke default"):
+            if st.button("♻️ Reset Filter (Jan 26+)", use_container_width=True, help="Kembalikan filter ke Awal Tahun 2026"):
                  st.session_state.global_filters = {
-                    'date_range': (default_start, today),
+                    'date_range': (date(2026, 1, 1), today),
                     'shift': 'All Displatch',
                     'front': [],
                     'excavator': [],
@@ -117,19 +138,18 @@ def render_sidebar():
             )
             
             
-            # Load data ONCE for all filters
-            from utils.data_loader import load_produksi
-            df_prod = load_produksi()
+            
+            # Load filter options from session_state (preloaded at login)
+            # Falls back to loader only if not preloaded
+            filter_options = st.session_state.get('filter_options', None)
+            if not filter_options:
+                from utils.data_loader import get_filter_options
+                filter_options = get_filter_options()
+                st.session_state['filter_options'] = filter_options
     
-            # 2. Shift Filter (Dynamic)
-            # Load unique shifts
+            # 2. Shift Filter (Dynamic from SQL)
             shift_options = ["All Displatch"]
-            if not df_prod.empty and 'Shift' in df_prod.columns:
-                # Get unique shifts, convert to string, sort
-                unique_shifts = sorted(df_prod['Shift'].astype(str).unique().tolist())
-                shift_options.extend(unique_shifts)
-            else:
-                shift_options.extend(["Shift 1", "Shift 2"]) # Fallback
+            shift_options.extend(filter_options.get('shift', []))
                 
             # Get current shift value safely
             current_shift = st.session_state.global_filters.get('shift', 'All Displatch')
@@ -143,44 +163,34 @@ def render_sidebar():
                 key="filter_shift"
             )
             
-            # 3. Dynamic Filters (Front & Excavator)
-            # Data already loaded above
+            # 3. Dynamic Filters (Front & Excavator from SQL)
             
             # Front Filter
-            front_options = sorted(df_prod['Front'].dropna().unique().tolist()) if not df_prod.empty and 'Front' in df_prod.columns else []
             front_select = st.multiselect(
                 "📍 Lokasi Kerja (Front)",
-                options=front_options,
+                options=filter_options.get('front', []),
                 default=st.session_state.global_filters.get('front', []),
                 placeholder="Pilih Front (Opsional)",
                 key="filter_front"
             )
             
             # Excavator Filter
-            exca_options = sorted(df_prod['Excavator'].dropna().unique().tolist()) if not df_prod.empty and 'Excavator' in df_prod.columns else []
             exca_select = st.multiselect(
                 "🚜 Unit Excavator",
-                options=exca_options,
+                options=filter_options.get('excavator', []),
                 default=st.session_state.global_filters.get('excavator', []),
                 placeholder="Pilih Unit (Opsional)",
                 key="filter_exca"
             )
             
-            # Material Filter (New Professional Requirement)
-            # Check for Commudity / Commodity column
-            mat_col = 'Commudity' if not df_prod.empty and 'Commudity' in df_prod.columns else ('Commodity' if not df_prod.empty and 'Commodity' in df_prod.columns else None)
-            
-            if mat_col:
-                mat_options = sorted(df_prod[mat_col].dropna().unique().tolist())
-                mat_select = st.multiselect(
-                    "🪨 Jenis Material",
-                    options=mat_options,
-                    default=st.session_state.global_filters.get('material', []),
-                    placeholder="Pilih Material (Opsional)",
-                    key="filter_mat"
-                )
-            else:
-                mat_select = []
+            # Material Filter
+            mat_select = st.multiselect(
+                "🪨 Jenis Material",
+                options=filter_options.get('material', []),
+                default=st.session_state.global_filters.get('material', []),
+                placeholder="Pilih Material (Opsional)",
+                key="filter_mat"
+            )
             
             # Store in session state
             st.session_state.global_filters['date_range'] = date_range
@@ -204,12 +214,20 @@ def render_sidebar():
             ("📋", "Rencana Harian")
         ]
         
+        def set_menu(menu_name):
+            st.session_state.current_menu = menu_name
+            
         for icon, menu in menus:
             # Map old menu names if needed or handle routing in app.py
             btn_type = "primary" if st.session_state.current_menu == menu else "secondary"
-            if st.button(f"{icon}  {menu}", key=f"nav_{menu}", use_container_width=True, type=btn_type):
-                st.session_state.current_menu = menu
-                st.rerun()
+            st.button(
+                f"{icon}  {menu}", 
+                key=f"nav_{menu}", 
+                use_container_width=True, 
+                type=btn_type,
+                on_click=set_menu,
+                args=(menu,)
+            )
         
         st.markdown("---")
         

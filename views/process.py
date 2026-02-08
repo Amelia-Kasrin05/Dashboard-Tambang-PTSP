@@ -46,7 +46,7 @@ def show_process():
         return
 
     # Debug: Check columns (New Schema)
-    required_cols = ['Ritase', 'Loader', 'Unit', 'Jam']
+    required_cols = ['Ritase', 'Dumping', 'Unit', 'Jam']
     missing = [c for c in required_cols if c not in df_filtered.columns]
     if missing:
         st.error(f"⚠️ Missing Columns: {missing}")
@@ -66,7 +66,7 @@ def show_process():
     best_shift_val = shift_perf.iloc[0] if not shift_perf.empty else 0
     
     # Active Fleet
-    active_loaders = df_filtered['Loader'].nunique()
+    active_loaders = df_filtered['Dumping'].nunique()
     active_haulers = df_filtered['Unit'].nunique() # "Unit" is now Hauler
 
     # KPI CARDS
@@ -103,7 +103,22 @@ def show_process():
     # 4. CHARTS
     
     # A. Hourly Rhythm (Area Chart)
-    hourly_rit = df_filtered.groupby('Jam')['Ritase'].sum().reset_index()
+    # Extract hour from Jam column (handles both "HH:00-HH:00" format and integer)
+    df_for_hourly = df_filtered.copy()
+    def extract_hour(jam):
+        try:
+            s = str(jam)
+            if ':' in s:
+                return int(s.split(':')[0])
+            return int(float(s))
+        except:
+            return -1
+    df_for_hourly['Hour'] = df_for_hourly['Jam'].apply(extract_hour)
+    df_for_hourly = df_for_hourly[df_for_hourly['Hour'] >= 0]
+    
+    hourly_rit = df_for_hourly.groupby('Hour')['Ritase'].sum().reset_index()
+    hourly_rit.columns = ['Jam', 'Ritase']
+    
     all_hours = pd.DataFrame({'Jam': range(24)})
     hourly_rit = all_hours.merge(hourly_rit, on='Jam', how='left').fillna(0)
     
@@ -122,6 +137,11 @@ def show_process():
 
     # B. Shift Comparison
     chart_shift_perf = df_filtered.groupby('Shift')['Ritase'].sum().reset_index()
+    chart_shift_perf['Shift'] = 'Shift ' + chart_shift_perf['Shift'].astype(str)
+    
+    # Distinct colors per shift (matching reference)
+    SHIFT_COLORS = {'Shift 1': '#3b82f6', 'Shift 2': '#8b5cf6', 'Shift 3': '#06b6d4'}
+    
     fig_shift = px.bar(
         chart_shift_perf, 
         x='Shift', 
@@ -129,20 +149,20 @@ def show_process():
         title="<b>📊 Performa Antar Shift</b><br><span style='font-size: 12px; color: gray;'>Perbandingan Produktivitas Regu</span>",
         text='Ritase',
         color='Shift',
-        color_discrete_sequence=px.colors.qualitative.Prism 
+        color_discrete_map=SHIFT_COLORS
     )
     fig_shift.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
     fig_shift.update_layout(showlegend=False)
     fig_shift.update_layout(**get_chart_layout(height=400))
 
     # C. Loader Contribution (Was Unit)
-    # Using 'Loader' column
-    unit_perf = df_filtered.groupby('Loader')['Ritase'].sum().sort_values(ascending=True).reset_index()
+    # Using 'Dumping' column
+    unit_perf = df_filtered.groupby('Dumping')['Ritase'].sum().sort_values(ascending=True).reset_index()
     fig_unit = px.bar(
         unit_perf,
-        y='Loader',
+        y='Dumping',
         x='Ritase',
-        title="<b>🚜 Peringkat Loader</b><br><span style='font-size: 12px; color: gray;'>Kontribusi per Alat Muat (Dumping)</span>",
+        title="<b>🚜 Peringkat Loader (Dumping)</b><br><span style='font-size: 12px; color: gray;'>Kontribusi per Alat Muat (Dumping)</span>",
         orientation='h',
         text='Ritase',
         color_discrete_sequence=['#10b981']
@@ -197,16 +217,18 @@ def show_process():
             df_display = df_display.sort_index(ascending=False)
         
         # 2. Format Date
-        df_display['Date'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d')
+        df_display['Date'] = df_display['Tanggal'].astype(str)
         
         # 3. Rename Columns to Match Excel Headers request:
         # Internal -> External
-        # Loader -> Dumping
+        # Jam -> Time
+        # dumping -> Dumping 
         # Unit -> Unit (Hauler)
         # Ritase -> Ritase (Count)
         df_display = df_display.rename(columns={
+            'Jam': 'Time',
             'Jam_Range': 'Time',
-            'Loader': 'Dumping',
+            # 'Dumping' already named 'Dumping'
             'Unit': 'Unit',
             'Ritase': 'Ritase'
         })

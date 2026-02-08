@@ -62,7 +62,11 @@ def main():
     if not st.session_state.logged_in:
         show_login()
     else:
+        # NOTE: Preloader removed since persist="disk" makes loading instant.
+        # Each view loads its own data from disk cache when accessed.
+        
         render_sidebar()
+
         
         # Route to pages
         menu = st.session_state.current_menu

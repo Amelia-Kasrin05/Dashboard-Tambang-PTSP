@@ -16,48 +16,52 @@ from utils.helpers import get_chart_layout
 def show_shipping():
     """Sales & Shipping Analysis - Executive View"""
     
-    # 1. LOAD DATA
-    with st.spinner("Memuat Data Pengiriman..."):
-        df_shipping = load_shipping_data()
-        
-        # Timestamp Info
-        last_update = st.session_state.get('last_update_shipping', '-')
-        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
+    # 1. GET PRELOADED DATA (INSTANT)
+    df_shipping = st.session_state.get('df_shipping', pd.DataFrame())
+    
+    # Fallback if not preloaded
+    if df_shipping.empty:
+        with st.spinner("Memuat Data Pengiriman..."):
+            df_shipping = load_shipping_data()
+    
+    # Timestamp Info
+    last_update = st.session_state.get('last_update_shipping', '-')
+    st.caption(f"🕒 Data: **{last_update}** | ⚡ Pre-loaded")
 
-        # Feedback for Force Sync
-        if st.session_state.get('force_cloud_reload', False):
-             if not df_shipping.empty:
-                 st.toast("✅ Cloud Data Linked!", icon="☁️")
-             else:
-                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
-        
-        df = apply_global_filters(df_shipping, date_col='Date')
-        
+    df = apply_global_filters(df_shipping, date_col='Date')
+    
     if df.empty:
         st.warning("⚠️ Data Pengiriman tidak tersedia.")
         return
 
     # 2. DATA PROCESSING (Material Focus)
-    # Ensure columns exist (loaded by updated loader)
-    cols_check = ['AP_LS', 'AP_LS_MK3', 'AP_SS']
+    # Ensure columns exist (loaded by updated loader with DB names)
+    # DB Columns: ap_ls, ap_ls_mk3, ap_ss, total_ls, total_ss
+    cols_check = ['ap_ls', 'ap_ls_mk3', 'ap_ss', 'total_ls', 'total_ss']
     for c in cols_check:
         if c not in df.columns: df[c] = 0
         
+    # Calculate Quantity for internal logic (KPIs/Charts) but DO NOT SHOW in table
+    # Quantity = Total LS + Total SS (Based on old logic)
+    # or sum of components: ap_ls + ap_ls_mk3 + ap_ss
+    # Let's use components sum to be safe and independent of 'total' columns
+    df['Quantity'] = df['ap_ls'] + df['ap_ls_mk3'] + df['ap_ss']
+
     # Metrics
-    total_qty = df['Quantity'].sum() if 'Quantity' in df.columns else 0
+    total_qty = df['Quantity'].sum()
     # Hitung Transaksi: Hanya hitung baris yang Volume-nya > 0 (Shift Aktif)
     # Jangan hitung baris tanggal yang isinya masih nol (pre-filled dates)
     total_rit = len(df[df['Quantity'] > 0])
     
     # Calculate Material Totals
-    total_ls = df['AP_LS'].sum()
-    total_mk3 = df['AP_LS_MK3'].sum()
-    total_ss = df['AP_SS'].sum()
+    total_ls = df['ap_ls'].sum()
+    total_mk3 = df['ap_ls_mk3'].sum()
+    total_ss = df['ap_ss'].sum()
     
     # Determine Dominant Material
     materials = {'Limestone': total_ls, 'LS MK3': total_mk3, 'Silica Stone': total_ss}
-    dominant_mat = max(materials, key=materials.get)
-    dominant_val = materials[dominant_mat]
+    dominant_mat = max(materials, key=materials.get) if materials else 'None'
+    dominant_val = materials[dominant_mat] if materials else 0
     
     avg_daily = total_qty / df['Date'].nunique() if df['Date'].nunique() > 0 else 0
 
@@ -111,7 +115,7 @@ def show_shipping():
                               color='Material',
                               color_discrete_map={
                                   'Limestone (LS)': '#3b82f6', # Blue
-                                  'LS MK3': '#60a5fa',        # Light Blue
+                                  'LS MK3': '#8b5cf6',        # Purple (High Contrast)
                                   'Silica Stone (SS)': '#10b981' # Green
                               })
             
@@ -142,7 +146,7 @@ def show_shipping():
                                text='Quantity',
                                color='Shift', color_discrete_sequence=['#f59e0b', '#8b5cf6', '#ec4899'])
             
-            fig_shift.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+            fig_shift.update_traces(texttemplate='%{text:,.0f}', textposition='inside')
             
             # Fix Layout Merge
             layout_shift = get_chart_layout(height=350)
@@ -162,19 +166,19 @@ def show_shipping():
         st.markdown("##### 📈 **TREN HARIAN** | Fluktuasi per Material")
         st.markdown("---")
         
-        # Melt for Stacked Bar
-        daily_melt = df.melt(id_vars=['Date'], value_vars=['AP_LS', 'AP_LS_MK3', 'AP_SS'], 
+        # Melt for Stacked Bar (Use lowercase columns)
+        daily_melt = df.melt(id_vars=['Date'], value_vars=['ap_ls', 'ap_ls_mk3', 'ap_ss'], 
                              var_name='Material', value_name='Volume')
         daily_melt = daily_melt.groupby(['Date', 'Material'])['Volume'].sum().reset_index()
         
         # Rename for nice legend
-        material_map = {'AP_LS': 'Limestone', 'AP_LS_MK3': 'LS MK3', 'AP_SS': 'Silica Stone'}
+        material_map = {'ap_ls': 'Limestone', 'ap_ls_mk3': 'LS MK3', 'ap_ss': 'Silica Stone'}
         daily_melt['Material'] = daily_melt['Material'].map(material_map)
         
         fig_trend = px.bar(daily_melt, x='Date', y='Volume', color='Material',
                            color_discrete_map={
                                   'Limestone': '#3b82f6', 
-                                  'LS MK3': '#60a5fa',        
+                                  'LS MK3': '#8b5cf6', # Purple (Match Donut Chart)       
                                   'Silica Stone': '#10b981'
                            })
         
@@ -194,29 +198,57 @@ def show_shipping():
             title="Tren Harian breakdown Material",
             xaxis_title="Tanggal",
             yaxis_title="Volume (Ton)",
-            hovermode="x unified",
-            legend=dict(orientation="h", y=1.1)
+            legend=dict(orientation="h", y=-0.25, x=0.5, xanchor="center"), # Move legend to bottom
+            hovermode="x unified"
         ))
         fig_trend.update_layout(**layout)
         st.plotly_chart(fig_trend, use_container_width=True)
             
-    # 5. DATA TABLE
     with st.expander("📄 Lihat Detail Data Textual"):
+        # Hide internal calculated columns (Quantity) but keep DB ones per user request
+        # AND Rename Date -> tanggal, Shift -> shift to match DB headers exactly
+        # RENAME HEADERS (Raw DB -> Title Case)
+        rename_display = {
+            'Date': 'Tanggal', 
+            'Shift': 'Shift',
+            'tanggal': 'Tanggal',
+            'shift': 'Shift',
+            'ap_ls': 'AP LS',
+            'ap_mk3': 'AP MK3',
+            'ap_ss': 'AP SS',
+            'total_ls': 'Total LS',
+            'total_ss': 'Total SS',
+            'mitra_ton': 'Mitra (Ton)'
+        }
+        df_display = df.drop(columns=['Quantity'], errors='ignore').rename(columns=rename_display)
+        
+        # Display Sort: Descending (Newest First)
+        # User REQ: "Data terbaru di paling atas"
+        if 'Tanggal' in df_display.columns:
+             df_display = df_display.sort_values(by='Tanggal', ascending=False)
+        
         st.dataframe(
-            df, 
+            df_display, 
             use_container_width=True,
+            hide_index=True,
             column_config={
-                "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD")
+                "Tanggal": st.column_config.DateColumn("Tanggal", format="YYYY-MM-DD")
             }
         )
         
-        # Excel Download (Sort Ascending = Oldest First)
-        df_download = df.sort_values(by='Date', ascending=True)
+        # Excel Download (Sort Ascending = OLDEST FIRST)
+        # User REQ: "Saat di download data yang paling lama di atas"
+        # Use df_display (cleaned & renamed) as source
+        # Sort by 'Tanggal' (Title Case)
+        if 'Tanggal' in df_display.columns:
+            df_download = df_display.sort_values(by='Tanggal', ascending=True)
+        else:
+            df_download = df_display
         
         # Format Date to String (Remove 00:00:00)
-        if 'Date' in df_download.columns:
+        if 'Tanggal' in df_download.columns:
              try:
-                df_download['Date'] = pd.to_datetime(df_download['Date']).dt.strftime('%Y-%m-%d')
+                df_download['Tanggal'] = pd.to_datetime(df_download['Tanggal']).dt.strftime('%Y-%m-%d')
              except:
                 pass
         

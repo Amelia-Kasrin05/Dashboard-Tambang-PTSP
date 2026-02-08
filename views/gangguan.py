@@ -49,28 +49,26 @@ def show_gangguan():
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. Load Data
+    # 1. GET PRELOADED DATA (INSTANT)
     # ----------------------------------------
-    with st.spinner("Memuat Data Gangguan..."):
-        df_gangguan = load_gangguan_all()
-        
-        # Timestamp Info
-        last_update = st.session_state.get('last_update_gangguan', '-')
-        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode)")
-        
-        # Load Production to get Total Active Fleet Size (Professional Standard)
+    # Use preloaded data from session_state (no DB query on module switch)
+    df_gangguan = st.session_state.get('df_gangguan', pd.DataFrame())
+    df_prod = st.session_state.get('df_prod', pd.DataFrame())
+    
+    # Fallback if not preloaded
+    if df_gangguan.empty:
+        with st.spinner("Memuat Data Gangguan..."):
+            df_gangguan = load_gangguan_all()
+    if df_prod.empty:
         df_prod = load_produksi()
-        
-        # Feedback for Force Sync
-        if st.session_state.get('force_cloud_reload', False):
-             if not df_gangguan.empty:
-                 st.toast("✅ Cloud Data Linked!", icon="☁️")
-             else:
-                 st.error("❌ Cloud Sync Failed - Data Empty/Connection Error")
-        
-        # Apply Global Filters
-        df_gangguan = apply_global_filters(df_gangguan, date_col='Tanggal')
-        df_prod = apply_global_filters(df_prod, date_col='Date')
+    
+    # Timestamp Info
+    last_update = st.session_state.get('last_update_gangguan', '-')
+    st.caption(f"🕒 Data: **{last_update}** | ⚡ Pre-loaded")
+    
+    # Apply Global Filters
+    df_gangguan = apply_global_filters(df_gangguan, date_col='Tanggal')
+    df_prod = apply_global_filters(df_prod, date_col='Date')
         
     if df_gangguan.empty:
         st.warning("⚠️ Data Gangguan tidak tersedia.")
@@ -349,6 +347,29 @@ def show_gangguan():
         # 1. Format Tanggal (Date only: YYYY-MM-DD)
         if 'Tanggal' in df_display.columns:
              df_display['Tanggal'] = pd.to_datetime(df_display['Tanggal']).dt.strftime('%Y-%m-%d')
+             
+        # Reorder Columns: Put Bulan, Tahun, Week after Tanggal
+        cols = list(df_display.columns)
+        new_order = []
+        if 'Tanggal' in cols: new_order.append('Tanggal')
+        if 'Bulan' in cols: new_order.append('Bulan')
+        if 'Tahun' in cols: new_order.append('Tahun')
+        if 'Week' in cols: new_order.append('Week')
+        
+        # Add rest of columns
+        for c in cols:
+            if c not in new_order:
+                new_order.append(c)
+        
+        df_display = df_display[new_order]
+        
+        df_display = df_display[new_order]
+
+        # 2b. Drop internal ID column and Helper Columns (User Request: Hide Bulan/Tahun/Week)
+        hide_cols = ['id', 'Bulan', 'Tahun', 'Week']
+        for c in hide_cols:
+            if c in df_display.columns:
+                df_display = df_display.drop(columns=[c])
         
         # 2. Format Start/End (Time only: HH:MM)
         if 'Start' in df_display.columns:
@@ -361,31 +382,35 @@ def show_gangguan():
              df_display['Durasi'] = pd.to_numeric(df_display['Durasi'], errors='coerce')
              df_display['Durasi'] = df_display['Durasi'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
              
-        # 3. Drop columns after Link/Lampiran (Clean up)
-        if 'Link/Lampiran' in df_display.columns:
-             try:
-                 cols = list(df_display.columns)
-                 idx = cols.index('Link/Lampiran')
-                 # Keep columns up to Link/Lampiran inclusive
-                 cols_to_keep = cols[:idx+1]
-                 df_display = df_display[cols_to_keep]
-             except:
-                 pass
+        # 3. Drop columns after Link/Lampiran logic REMOVED to show Month/Year/Week columns
+        # if 'Link/Lampiran' in df_display.columns:
+        #      pass
              
-        # Sort latest first if possible, or reverse
-        df_display = df_display.iloc[::-1]
+        # Sort latest first if possible, or reverse (DISABLED as per user request to match DB order)
+        # df_display = df_display.iloc[::-1]
+        
+        # Display Sort: Descending (Newest First)
+        if 'Tanggal' in df_display.columns:
+             sort_cols_disp = ['Tanggal']
+             if 'Start' in df_display.columns: sort_cols_disp.append('Start')
+             df_display = df_display.sort_values(by=sort_cols_disp, ascending=False)
+        
+        # Final Format for Week column if exists (Database returns Int64, display as int)
+        if 'Week' in df_display.columns:
+             df_display['Week'] = df_display['Week'].astype(str)
 
-        st.dataframe(df_display, use_container_width=True)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
         
 
         
-        # Excel Download (Sort Ascending = Oldest Data First)
+        # Excel Download (Sort Descending = NEWEST FIRST)
+        # User Req: "Data paling bawah di tabel (terbaru) jadi paling atas di download"
         # 1. Sort by DATE THEN Start Time
-        # The column in df_gangguan is 'Tanggal' (confirmed by file inspection)
         sort_cols = []
         if 'Tanggal' in df_gangguan.columns: sort_cols.append('Tanggal')
         if 'Start' in df_gangguan.columns: sort_cols.append('Start')
         
+        # Ascending Sort
         df_download = df_gangguan.sort_values(by=sort_cols, ascending=True) if sort_cols else df_gangguan
         
         # 2. Format Date to String (YYYY-MM-DD) to remove 00:00:00 timestamp
@@ -397,9 +422,12 @@ def show_gangguan():
             except:
                 pass # If it fails (already string or strange format), leave it
                 
-        # 3. Drop unwanted columns (Extra, Bulan_Name)
+        if 'Week' in df_download.columns:
+             df_download['Week'] = df_download['Week'].fillna(0).astype(int).astype(str)
+
+        # 3. Drop unwanted columns (Extra, Bulan_Name, id, and User requested to hide Bulan/Tahun/Week)
         # Explicit drop is safer than index truncation
-        unwanted_cols = ['Extra', 'Bulan_Name', 'Month', 'Month_Name']
+        unwanted_cols = ['Extra', 'Bulan_Name', 'Month', 'Month_Name', 'id', 'Bulan', 'Tahun', 'Week']
         df_download = df_download.drop(columns=unwanted_cols, errors='ignore')
         
         from utils.helpers import convert_df_to_excel

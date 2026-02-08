@@ -45,38 +45,44 @@ def show_ritase():
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. LOAD DATA
+    # 1. GET PRELOADED DATA (INSTANT)
     # ----------------------------------------
-    with st.spinner("Loading Hauling Data..."):
-        df_prod_raw = load_produksi() # Keep raw copy (Ritase uses production file)
-        
-        # Timestamp Info
-        last_update = st.session_state.get('last_update_produksi', '-')
-        st.caption(f"🕒 Data Downloaded At: **{last_update}** (Cloud Only Mode - Production Source)")
-        
-        # Feedback for Force Sync
-        if df_prod_raw.empty:
-            st.warning("⚠️ Data produksi tidak tersedia (Kosong/Belum Sync). Silakan cek koneksi.")
-            # Show debug log if empty
-            if 'debug_log_produksi' in st.session_state and st.session_state['debug_log_produksi']:
-                 with st.expander("🛠️ Debug Info (Kenapa Data Kosong?)"):
-                     st.json(st.session_state['debug_log_produksi'])
-            return
+    # Use preloaded data from session_state (no DB query on module switch)
+    df_prod_raw = st.session_state.get('df_prod', pd.DataFrame())
+    
+    # Fallback if not preloaded (first load or after sync)
+    if df_prod_raw.empty:
+        with st.spinner("Loading Hauling Data..."):
+            df_prod_raw = load_produksi()
+    
+    # Timestamp Info
+    last_update = st.session_state.get('last_update_produksi', '-')
+    st.caption(f"🕒 Data: **{last_update}** | ⚡ Pre-loaded")
+    
+    # Feedback for Force Sync
+    if df_prod_raw.empty:
+        st.warning("⚠️ Data produksi tidak tersedia (Kosong/Belum Sync). Silakan cek koneksi.")
+        # Show debug log if empty
+        if 'debug_log_produksi' in st.session_state and st.session_state['debug_log_produksi']:
+             with st.expander("🛠️ Debug Info (Kenapa Data Kosong?)"):
+                 st.json(st.session_state['debug_log_produksi'])
+        return
 
-        # Feedback for Force Sync
-        if st.session_state.get('force_cloud_reload', False):
-             st.toast("✅ Data Updated from Cloud!", icon="☁️")
-        
-        df_prod = apply_global_filters(df_prod_raw)
-        
-        # Explicitly filter invalid Tonnase for CHARTS (Charts must remain clean)
-        # But we will keep df_prod_raw or create a display version for table later
-        if 'Tonnase' in df_prod.columns:
-             df_prod = df_prod[df_prod['Tonnase'] > 0]
+    # Feedback for Force Sync
+    if st.session_state.get('force_cloud_reload', False):
+         st.toast("✅ Data Updated from Cloud!", icon="☁️")
+    
+    df_prod = apply_global_filters(df_prod_raw)
+
+    # Explicitly filter invalid Tonnase for CHARTS (Charts must remain clean)
+    # But we will keep df_prod_raw or create a display version for table later
+    if 'Tonnase' in df_prod.columns:
+         df_prod = df_prod[df_prod['Tonnase'] > 0]
         
     if df_prod.empty:
         st.warning("⚠️ Data produksi/ritase tidak tersedia untuk periode ini.")
         return
+
 
     # 2. KPI CALCULATIONS (TARGET VS ACTUAL)
     # ----------------------------------------
@@ -335,27 +341,33 @@ def show_ritase():
         
         # Format Date to String (YYYY-MM-DD)
         if 'Date' in display_df.columns:
-            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
+            display_df['Date'] = display_df['Date'].astype(str)
             
         # Select relevant columns for Ritase view
         # Select relevant columns for Ritase view (MATCHING PRODUKSI)
-        cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commudity', 
+        cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commodity', 
                 'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         
         # Filter existing columns
         show_cols = [c for c in cols if c in display_df.columns]
         
-        # LOGIC MATCHING PRODUKSI: Reverse Order (Last Excel Row -> First)
-        display_reversed = display_df.iloc[::-1]
+        # Filter existing columns
+        show_cols = [c for c in cols if c in display_df.columns]
         
-        st.dataframe(display_reversed[show_cols], use_container_width=True)
+        # Display Sort: Descending (Newest data first - matches DB insert order)
+        if 'Date' in display_df.columns and 'Time' in display_df.columns:
+             display_df = display_df.sort_values(by=['Date', 'Time'], ascending=False)
+        elif 'Date' in display_df.columns:
+             display_df = display_df.sort_values(by=['Date'], ascending=False)
         
-        # Excel Download (Sort Ascending = Oldest Data First)
-        # Sort using the potentially reversed or raw data
-        df_download = display_reversed[show_cols].iloc[::-1] if not display_reversed.empty else display_reversed
+        st.dataframe(display_df[show_cols], use_container_width=True)
         
-        # Better: Sort explicitly if possible
-        if 'Date' in df_download.columns:
+        # Excel Download (Sort Ascending = OLDEST FIRST for chronological order)
+        df_download = display_df[show_cols].copy()
+        
+        if 'Date' in df_download.columns and 'Time' in df_download.columns:
+             df_download = df_download.sort_values(by=['Date', 'Time'], ascending=True)
+        elif 'Date' in df_download.columns:
              df_download = df_download.sort_values(by=['Date'], ascending=True)
 
         from utils.helpers import convert_df_to_excel
