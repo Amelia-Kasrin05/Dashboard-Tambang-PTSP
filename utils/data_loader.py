@@ -1808,7 +1808,7 @@ def load_tonase_raw():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL, persist="disk")
+@st.cache_data(ttl=CACHE_TTL)
 def load_shipping_data():
     """
     Load data pengiriman from 'TONASE PENGIRIMAN ' sheet.

@@ -48,7 +48,7 @@ try:
 except:
     pass
 
-CACHE_TTL = 300
+CACHE_TTL = 3600  # 1 hour (was 300 seconds / 5 minutes)
 
 def get_monitoring_path():
     if os.path.exists(MONITORING_EXCEL_PATH):

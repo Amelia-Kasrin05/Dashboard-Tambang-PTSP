@@ -145,3 +145,14 @@ class TargetLog(Base):
 
     def __repr__(self):
         return f"<TargetLog(date={self.date}, plan={self.plan})>"
+
+# 7. SYSTEM LOGS (For Sync Status)
+class SystemLog(Base):
+    __tablename__ = 'system_logs'
+    
+    key = Column(String(50), primary_key=True)   # e.g., 'last_sync'
+    value = Column(String(255))                  # e.g., '2026-02-09 17:00'
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SystemLog({self.key}={self.value})>"

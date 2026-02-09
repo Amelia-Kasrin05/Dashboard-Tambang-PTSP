@@ -4,7 +4,7 @@
 
 import streamlit as st
 from config import CACHE_TTL
-from utils import check_onedrive_status
+# check_onedrive_status removed - using static Database indicator for speed
 from utils.helpers import get_logo_base64
 from .login import logout
 
@@ -41,26 +41,38 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # Connection Status
+        # Connection Status - Database Mode (No OneDrive check for speed)
         st.markdown('<p class="nav-label">📡 Data Status</p>', unsafe_allow_html=True)
         
-        status = check_onedrive_status()
-        status_html = '<div class="status-grid">'
-        for name, stat in status.items():
-            if "✅" in stat:
-                status_class = "status-ok"
-            elif "⚠️" in stat:
-                status_class = "status-warn"
-            else:
-                status_class = "status-err"
-            status_html += f'<div class="status-item"><span class="status-name">{name}</span><span class="status-value {status_class}">{stat}</span></div>'
+        # Static status since we're using Database, not OneDrive
+        # This avoids 10-14 second delay from check_onedrive_status()
+        st.markdown('''
+        <div class="status-grid">
+            <div class="status-item">
+                <span class="status-name">Database</span>
+                <span class="status-value status-ok">✅ Connected</span>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
             
         # Unified Sync Button (Professional Single-Click Action)
         if st.button("🔄 Sync & Refresh Data", use_container_width=True, type="primary", help="Ambil data terbaru dari OneDrive dan perbarui tampilan"):
             with st.status("🔄 Sinkronisasi Data OneDrive...", expanded=True) as status:
                 st.write("Menghubungkan ke Database...")
+                
+                # 1. Clear ALL caches BEFORE sync
                 st.cache_data.clear()
                 st.cache_resource.clear()
+                
+                # 2. Clear ALL session state data
+                keys_to_clear = [
+                    'df_prod', 'df_gangguan', 'df_shipping', 'df_stockpile', 
+                    'df_ritase', 'df_daily_plan', 'df_target',
+                    'last_sync_time', 'data_loaded'
+                ]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 
                 try:
                     from utils.sync_manager import sync_all_data
@@ -69,28 +81,45 @@ def render_sidebar():
                     report = sync_all_data()
                     
                     for module, result in report.items():
-                        if "✅" in result:
-                            st.write(f"{module}: {result}")
-                        else:
-                            st.write(f"{module}: {result}")
-                            
+                        st.write(f"{module}: {result}")
+                    
+                    # 3. Mark sync as complete with timestamp
+                    from datetime import datetime
+                    st.session_state['last_sync_time'] = datetime.now().strftime("%H:%M")
+                    
                     status.update(label="✅ Sinkronisasi Selesai!", state="complete", expanded=False)
                     st.toast("Data Berhasil Diperbarui!", icon="✅")
                     
-                    import time
-                    time.sleep(1)
+                    # 4. Force immediate rerun without delay
                     st.rerun()
                     
                 except Exception as e:
                     status.update(label="❌ Sinkronisasi Gagal", state="error")
                     st.error(f"Error: {str(e)}")
             
-        try:
-            from datetime import datetime
-            current_time = datetime.now().strftime("%H:%M")
-        except:
-            current_time = "--:--"
-        st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Last Update: {current_time}</p>', unsafe_allow_html=True)
+        # Display Last Sync Time (Actual sync time, not just render time)
+        last_sync = st.session_state.get('last_sync_time')
+        
+        # If not in session, try to fetch from DB (Persistent)
+        if not last_sync:
+            try:
+                from utils.db_manager import get_db_engine
+                from sqlalchemy import text
+                engine = get_db_engine()
+                if engine:
+                    with engine.connect() as conn:
+                        result = conn.execute(text("SELECT value FROM system_logs WHERE key = 'last_sync'"))
+                        row = result.fetchone()
+                        if row and row[0]:
+                            last_sync = row[0]
+                            st.session_state['last_sync_time'] = last_sync
+            except:
+                pass
+
+        if last_sync:
+            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem;">Last Sync: {last_sync}</p>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p style="color:#64748b; font-size:0.75rem; text-align:center; margin-top:0.5rem; font-style:italic;">Belum disinkronisasi hari ini</p>', unsafe_allow_html=True)
         
         st.markdown("---")
         

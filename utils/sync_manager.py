@@ -53,15 +53,51 @@ def filter_records_by_year(records, date_attr='date', year=2026):
             
     return filtered
 
-def safe_bulk_insert_report(session, model_class, records, label="Data"):
+# ==============================================================================
+# PERIOD-BASED SYNC CONFIGURATION
+# ==============================================================================
+SYNC_PERIOD_DAYS = 30  # Only sync last 30 days (keeps sync time constant)
+
+def filter_records_by_period(records, date_attr='date', days=SYNC_PERIOD_DAYS):
+    """Filter records to only include last N days"""
+    from datetime import timedelta
+    filtered = []
+    cutoff = (datetime.now() - timedelta(days=days)).date()
+    
+    for r in records:
+        val = getattr(r, date_attr, None)
+        if isinstance(val, (datetime, pd.Timestamp)):
+            val = val.date()
+        elif isinstance(val, str):
+            try:
+                val = pd.to_datetime(val).date()
+            except:
+                continue
+            
+        if val and val >= cutoff:
+            filtered.append(r)
+            
+    return filtered
+
+def safe_bulk_insert_report(session, model_class, records, label="Data", date_column='date'):
+    """
+    FULL SYNC: Delete ALL data and insert ALL records.
+    This ensures 100% data accuracy - any changes in Excel will be reflected.
+    
+    Trade-off: Slightly slower as data grows, but guaranteed accuracy.
+    """
     if not records:
-        return f"⚠️ {label}: Empty (No Data)"
+        return f"⚠️ {label}: Empty (No Data in Excel)"
     
     try:
+        # Delete ALL records (Full Replace)
         session.query(model_class).delete()
+        
+        # Insert all records
         session.bulk_save_objects(records)
         session.commit()
-        return f"✅ {label}: Success ({len(records)} rows)"
+        
+        return f"✅ {label}: Success ({len(records)} rows synced)"
     except Exception as e:
         session.rollback()
         return f"❌ {label}: Error ({str(e)[:50]})"
@@ -108,7 +144,7 @@ def sync_all_data():
                     records_prod.append(ProductionLog(**kwargs))
                 
                 records_prod = filter_records_by_year(records_prod, 'date', 2026)
-                status_report['Produksi'] = safe_bulk_insert_report(session, ProductionLog, records_prod, "Production")
+                status_report['Produksi'] = safe_bulk_insert_report(session, ProductionLog, records_prod, "Production", date_column='date')
             else:
                 status_report['Produksi'] = "⚠️ Empty Data"
         else:
@@ -136,7 +172,7 @@ def sync_all_data():
                     )
                     records.append(rec)
                 records = filter_records_by_year(records, 'tanggal', 2026)
-                status_report['Shipping'] = safe_bulk_insert_report(session, ShippingLog, records, "Shipping")
+                status_report['Shipping'] = safe_bulk_insert_report(session, ShippingLog, records, "Shipping", date_column='tanggal')
             else:
                 status_report['Shipping'] = "⚠️ Empty Data"
 
@@ -156,7 +192,7 @@ def sync_all_data():
                     )
                     records_st.append(rec)
                 records_st = filter_records_by_year(records_st, 'date', 2026)
-                status_report['Stockpile'] = safe_bulk_insert_report(session, StockpileLog, records_st, "Stockpile")
+                status_report['Stockpile'] = safe_bulk_insert_report(session, StockpileLog, records_st, "Stockpile", date_column='date')
             else:
                  status_report['Stockpile'] = "⚠️ Empty Data"
                  
@@ -169,7 +205,7 @@ def sync_all_data():
                     rec = TargetLog(date=row['Date'], plan=row['Plan'])
                     records_tgt.append(rec)
                 records_tgt = filter_records_by_year(records_tgt, 'date', 2026)
-                status_report['Targets'] = safe_bulk_insert_report(session, TargetLog, records_tgt, "Targets")
+                status_report['Targets'] = safe_bulk_insert_report(session, TargetLog, records_tgt, "Targets", date_column='date')
             else:
                 status_report['Targets'] = "⚠️ Empty Data"
 
@@ -221,7 +257,7 @@ def sync_all_data():
                     records_dp.append(DailyPlanLog(**kwargs))
                     
                 records_dp = filter_records_by_year(records_dp, 'tanggal', 2026)
-                status_report['Daily Plan'] = safe_bulk_insert_report(session, DailyPlanLog, records_dp, "Daily Plan")
+                status_report['Daily Plan'] = safe_bulk_insert_report(session, DailyPlanLog, records_dp, "Daily Plan", date_column='tanggal')
             else:
                 status_report['Daily Plan'] = "⚠️ Empty Data"
         else:
@@ -266,13 +302,33 @@ def sync_all_data():
                     records_dt.append(DowntimeLog(**kwargs))
                     
                 records_dt = filter_records_by_year(records_dt, 'tanggal', 2026)
-                status_report['Downtime'] = safe_bulk_insert_report(session, DowntimeLog, records_dt, "Downtime")
+                status_report['Downtime'] = safe_bulk_insert_report(session, DowntimeLog, records_dt, "Downtime", date_column='tanggal')
             else:
                  status_report['Downtime'] = "⚠️ Empty Data"
         else:
              status_report['Downtime'] = "❌ Download Failed"
     except Exception as e:
         status_report['Downtime'] = f"❌ Error: {str(e)[:50]}"
+
+    # ... (previous code) ...
+    
+    # 5. SAVE SYNC TIME TO DATABASE (PERSISTENT LOG)
+    try:
+        from utils.models import SystemLog
+        
+        # Check if key exists
+        log_entry = session.query(SystemLog).filter_by(key='last_sync').first()
+        current_time_str = datetime.now().strftime("%H:%M")
+        
+        if log_entry:
+            log_entry.value = current_time_str
+        else:
+            log_entry = SystemLog(key='last_sync', value=current_time_str)
+            session.add(log_entry)
+            
+        session.commit()
+    except Exception as e:
+        print(f"Failed to log sync time: {e}")
 
     session.close()
     return status_report

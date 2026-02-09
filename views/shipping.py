@@ -25,8 +25,10 @@ def show_shipping():
             df_shipping = load_shipping_data()
     
     # Timestamp Info
+    # Timestamp Info & Data Range
     last_update = st.session_state.get('last_update_shipping', '-')
-    st.caption(f"🕒 Data: **{last_update}** | ⚡ Pre-loaded")
+    max_date = df_shipping['Date'].max().strftime('%d %b %Y') if not df_shipping.empty and 'Date' in df_shipping.columns else "-"
+    st.caption(f"🕒 Last Sync: **{last_update}** | 📅 Data Sampai: **{max_date}** | ⚡ Ver: Database Mode")
 
     df = apply_global_filters(df_shipping, date_col='Date')
     
@@ -49,9 +51,9 @@ def show_shipping():
 
     # Metrics
     total_qty = df['Quantity'].sum()
-    # Hitung Transaksi: Hanya hitung baris yang Volume-nya > 0 (Shift Aktif)
-    # Jangan hitung baris tanggal yang isinya masih nol (pre-filled dates)
-    total_rit = len(df[df['Quantity'] > 0])
+    # Hitung Transaksi: Hitung semua laporan masuk (termasuk 0/nihil)
+    # User ingin melihat bahwa input mereka (meski 0) masuk ke sistem
+    total_rit = len(df)
     
     # Calculate Material Totals
     total_ls = df['ap_ls'].sum()
@@ -208,19 +210,24 @@ def show_shipping():
         # Hide internal calculated columns (Quantity) but keep DB ones per user request
         # AND Rename Date -> tanggal, Shift -> shift to match DB headers exactly
         # RENAME HEADERS (Raw DB -> Title Case)
+        # Perbaiki Rename Map agar sesuai dengan output loader/DB
         rename_display = {
             'Date': 'Tanggal', 
             'Shift': 'Shift',
             'tanggal': 'Tanggal',
             'shift': 'Shift',
             'ap_ls': 'AP LS',
-            'ap_mk3': 'AP MK3',
+            'ap_ls_mk3': 'AP MK3', # Corrected key
+            'ap_mk3': 'AP MK3',    # Fallback key
             'ap_ss': 'AP SS',
             'total_ls': 'Total LS',
             'total_ss': 'Total SS',
-            'mitra_ton': 'Mitra (Ton)'
         }
-        df_display = df.drop(columns=['Quantity'], errors='ignore').rename(columns=rename_display)
+        
+        # Tampilkan semua kolom yang relevan (termasuk komponen 0)
+        # Hapus 'Quantity' internal jika membingungkan, tapi user butuh lihat Total
+        cols_to_drop = ['Quantity'] if 'total_ls' in df.columns else []
+        df_display = df.drop(columns=cols_to_drop, errors='ignore').rename(columns=rename_display)
         
         # Display Sort: Descending (Newest First)
         # User REQ: "Data terbaru di paling atas"
