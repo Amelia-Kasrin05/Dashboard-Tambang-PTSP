@@ -318,7 +318,9 @@ def sync_all_data():
         
         # Check if key exists
         log_entry = session.query(SystemLog).filter_by(key='last_sync').first()
-        current_time_str = datetime.now().strftime("%H:%M")
+        import pytz
+        jakarta_tz = pytz.timezone('Asia/Jakarta')
+        current_time_str = datetime.now(jakarta_tz).strftime("%H:%M")
         
         if log_entry:
             log_entry.value = current_time_str

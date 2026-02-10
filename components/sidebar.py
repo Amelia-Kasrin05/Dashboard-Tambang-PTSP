@@ -84,8 +84,11 @@ def render_sidebar():
                         st.write(f"{module}: {result}")
                     
                     # 3. Mark sync as complete with timestamp
+                    import pytz
                     from datetime import datetime
-                    st.session_state['last_sync_time'] = datetime.now().strftime("%H:%M")
+                    jakarta_tz = pytz.timezone('Asia/Jakarta')
+                    current_time = datetime.now(jakarta_tz).strftime("%H:%M")
+                    st.session_state['last_sync_time'] = current_time
                     
                     status.update(label="✅ Sinkronisasi Selesai!", state="complete", expanded=False)
                     st.toast("Data Berhasil Diperbarui!", icon="✅")
@@ -99,6 +102,30 @@ def render_sidebar():
             
         # Display Last Sync Time (Actual sync time, not just render time)
         last_sync = st.session_state.get('last_sync_time')
+        
+        # Helper to convert to WIB if needed
+        def to_wib(time_val):
+            if not time_val: return None
+            try:
+                import pytz
+                from datetime import datetime
+                
+                # If it's already a string, assume it's correct or needs parsing
+                if isinstance(time_val, str):
+                    # Try to parse if it lacks timezone info, but for now we trust the string from DB
+                    return time_val
+                
+                # If datetime object
+                if isinstance(time_val, datetime):
+                    jakarta_tz = pytz.timezone('Asia/Jakarta')
+                    if time_val.tzinfo is None:
+                        # Assume UTC if no tzinfo, then convert
+                        return pytz.utc.localize(time_val).astimezone(jakarta_tz).strftime("%H:%M")
+                    else:
+                        return time_val.astimezone(jakarta_tz).strftime("%H:%M")
+            except:
+                pass
+            return time_val
         
         # If not in session, try to fetch from DB (Persistent)
         if not last_sync:
