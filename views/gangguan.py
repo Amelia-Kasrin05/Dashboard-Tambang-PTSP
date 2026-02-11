@@ -209,45 +209,71 @@ def show_gangguan():
                     
                     if not df_valid.empty:
                         # OPTIMIZATION: Fixed Top N Units (Default 15)
-                        # This balances "Clutter" vs "Detail" based on user preference
                         top_n_units = 15
 
-                        # Filter Top N Units by Downtime for Readability
-                        top_units_by_downtime = df_valid.groupby('Alat')['Durasi'].sum().sort_values(ascending=False).head(top_n_units).index
-                        df_timeline = df_valid[df_valid['Alat'].isin(top_units_by_downtime)].copy()
+                        # 1. Use Durasi column directly (more accurate than End-Start calc)
+                        # Durasi is from Excel/DB, avoids issues with time parsing
+                        df_valid = df_valid.copy()
+                        df_valid['Durasi'] = pd.to_numeric(df_valid['Durasi'], errors='coerce').fillna(0)
                         
-                        # Sort by Total Downtime for visual hierarchy
-                        # We want the worst unit at the TOP of the Y-axis
-                        unit_order = list(top_units_by_downtime) # Already sorted descending
+                        # 2. Group by Unit and Sum Durasi (hours)
+                        unit_stats = df_valid.groupby('Alat')['Durasi'].sum().reset_index()
                         
-                        # Timeline with Single Professional Color (Red)
-                        # "Less is More" - Avoid rainbow confetti
-                        fig = px.timeline(df_timeline, x_start="Start", x_end="End", y="Alat", 
-                                          # REMOVED color="Gangguan" to remove rainbow effect
-                                          title="", 
-                                          color_discrete_sequence=['#ef4444'], # Standard Breakdown Red
-                                          opacity=0.85,
-                                          hover_data=['Durasi', 'Keterangan', 'Penyebab', 'Gangguan'],
-                                          category_orders={"Alat": unit_order}) 
-                                          
-                        fig.update_yaxes(autorange="reversed", title=f"Unit (Top {top_n_units})") 
+                        # 3. Sort: Descending (Largest -> Smallest)
+                        # Then take Top N and reverse for Plotly Y-axis
+                        unit_stats = unit_stats.sort_values('Durasi', ascending=False)
                         
-                        # Clean Layout without Legend
-                        fig.update_layout(**get_chart_layout(height=450, show_legend=False)) 
-                        fig.update_layout(margin=dict(t=10, b=0, l=0, r=0))
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Add Help Expander
-                        with st.expander("ℹ️ Cara Membaca Timeline"):
-                            st.write(f"""
-                            *   **Sumbu Y (Kiri)**: Daftar Top {top_n_units} Unit yang paling lama rusak.
-                            *   **Balok Merah**: Menandakan durasi kerusakan (Downtime). 
-                            *   **Detail**: Arahkan kursor mouse ke balok merah untuk melihat **Jenis Masalah**.
-                            """)
-                        
-                        if len(df_valid['Alat'].unique()) > top_n_units:
-                            st.caption(f"ℹ️ Menampilkan {top_n_units} dari {len(df_valid['Alat'].unique())} unit dengan downtime tertinggi.")
+                        if not unit_stats.empty:
+                            # Get Top N (Highest downtime)
+                            top_units_df = unit_stats.head(top_n_units)
+                            
+                            # Create label mapping: "Unit (X.X jam)"
+                            label_map = {}
+                            for _, row in top_units_df.iterrows():
+                                label_map[row['Alat']] = f"{row['Alat']} ({row['Durasi']:.1f} jam)"
+                            
+                            # px.timeline auto-reverses Y-axis (first item = TOP)
+                            # top_units_df is already sorted descending, so first = highest
+                            unit_order_labeled = [label_map[u] for u in top_units_df['Alat']]
+                            
+                            # Filter main dataframe to only these units
+                            df_timeline = df_valid[df_valid['Alat'].isin(top_units_df['Alat'].tolist())].copy()
+                            
+                            if not df_timeline.empty:
+                                # Replace unit names with labeled versions for Y-axis
+                                df_timeline['Unit'] = df_timeline['Alat'].map(label_map)
+                                
+                                # Timeline with Single Professional Color (Red)
+                                fig = px.timeline(df_timeline, x_start="Start", x_end="End", y="Unit", 
+                                                  title="", 
+                                                  color_discrete_sequence=['#ef4444'], # Standard Breakdown Red
+                                                  opacity=0.85,
+                                                  hover_data=['Alat', 'Durasi', 'Keterangan', 'Penyebab', 'Gangguan'],
+                                                  category_orders={"Unit": unit_order_labeled}) 
+                                                  
+                                # Standard Axis (Largest values at Top)
+                                fig.update_yaxes(title=f"Unit (Top {len(unit_order_labeled)})") 
+                                
+                                # Clean Layout without Legend
+                                fig.update_layout(**get_chart_layout(height=450, show_legend=False)) 
+                                fig.update_layout(margin=dict(t=10, b=0, l=0, r=0))
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Add Help Expander
+                                with st.expander("ℹ️ Cara Membaca Timeline"):
+                                    st.write(f"""
+                                    *   **Sumbu Y (Kiri)**: Nama Unit + **Total Jam Downtime**. Paling Atas = Downtime Terbanyak.
+                                    *   **Balok Merah**: Setiap balok = 1 kejadian gangguan. Arahkan kursor untuk detail.
+                                    *   **Angka di label**: Total jam dari semua kejadian unit tersebut dijumlahkan.
+                                    """)
+                                
+                                if len(unit_stats) > top_n_units:
+                                    st.caption(f"ℹ️ Menampilkan {top_n_units} dari {len(unit_stats)} unit dengan downtime tertinggi.")
+                            else:
+                                st.info("Tidak ada data timeline untuk unit terpilih.")
+                        else:
+                            st.info("Tidak ada data statistik unit.")
                     else:
                         st.info("Data waktu Start/End tidak lengkap untuk Timeline.")
                 except Exception as e:

@@ -1808,49 +1808,47 @@ def load_tonase_raw():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=CACHE_TTL)
+@st.cache_data(ttl=CACHE_TTL, persist="disk")
 def load_shipping_data():
     """
-    Load data pengiriman from 'TONASE PENGIRIMAN ' sheet.
-    Enhanced to handle horizontal month blocks (Jan, Feb, etc. side-by-side).
-    (DEBUG MODE ENABLED)
+    Load data pengiriman from Database (shipping_logs table).
+    Fallback: OneDrive cloud download (disabled for speed).
     """
-    df = None
     debug_log = []
     
     # 0. TRY DATABASE LOAD
     try:
         engine = get_db_engine()
         if engine:
-            # Sort by ID ASC (Oldest First)
-            # OPTIMIZED: Filter only 2026+ data
-            # Select only needed columns (exclude id, created_at)
             query = "SELECT tanggal, shift, ap_ls, ap_ls_mk3, ap_ss, total_ls, total_ss FROM shipping_logs WHERE tanggal >= '2026-01-01' ORDER BY id ASC"
             df_db = pd.read_sql(query, engine)
+            print(f"[Shipping Loader] DB returned {len(df_db)} rows")
+            
             if not df_db.empty:
-                 # Rename only essential UI columns (Date/Shift), keep metrics as DB names per user request
                  rename_map = {
                     'tanggal': 'Date', 
                     'shift': 'Shift'
-                    # Metrics: ap_ls, ap_ls_mk3, ap_ss, total_ls, total_ss kept as is (lowercase)
                  }
                  df_db = df_db.rename(columns=rename_map)
-                 if 'Date' in df_db.columns: df_db['Date'] = pd.to_datetime(df_db['Date'])
+                 if 'Date' in df_db.columns: 
+                     df_db['Date'] = pd.to_datetime(df_db['Date'])
                  
-                 # Quantity calculation restored for Global Logic (Dashboard view needs it)
-                 # But will be hidden in Shipping Table View
+                 # Quantity calculation for Dashboard global view
                  if 'total_ls' in df_db.columns and 'total_ss' in df_db.columns:
-                     df_db['Quantity'] = df_db['total_ls'] + df_db['total_ss']
+                     df_db['Quantity'] = df_db['total_ls'].fillna(0) + df_db['total_ss'].fillna(0)
                  else:
-                     # Fallback to components
                      c_list = ['ap_ls', 'ap_ls_mk3', 'ap_ss']
                      for c in c_list: 
                          if c not in df_db.columns: df_db[c] = 0
-                     df_db['Quantity'] = df_db['ap_ls'] + df_db['ap_ls_mk3'] + df_db['ap_ss']
+                     df_db['Quantity'] = df_db['ap_ls'].fillna(0) + df_db['ap_ls_mk3'].fillna(0) + df_db['ap_ss'].fillna(0)
                  
-            st.session_state['last_update_shipping'] = "Database"
-            return df_db
+                 return df_db
+            else:
+                 print("[Shipping Loader] WARNING: DB query returned 0 rows!")
+        else:
+            print("[Shipping Loader] ERROR: No DB engine available!")
     except Exception as e:
+        print(f"[Shipping Loader] DB Error: {e}")
         debug_log.append(f"Shipping DB Query Error: {e}")
                  
     # FORCE STOP if DB Logic fails - Prevent Slow Cloud Fallback

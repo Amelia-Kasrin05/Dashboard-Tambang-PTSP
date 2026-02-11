@@ -23,6 +23,12 @@ def show_shipping():
     if df_shipping.empty:
         with st.spinner("Memuat Data Pengiriman..."):
             df_shipping = load_shipping_data()
+            if not df_shipping.empty:
+                st.session_state['df_shipping'] = df_shipping
+    
+    # Set source indicator
+    if not df_shipping.empty:
+        st.session_state['last_update_shipping'] = "Database"
     
     # Timestamp Info
     # Timestamp Info & Data Range

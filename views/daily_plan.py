@@ -844,38 +844,21 @@ def show_daily_plan():
 
     
     # ============================================================
-    # FILTERS SECTION
+    # FILTER: Tanggal Only
     # ============================================================
-    st.markdown("""
-    <div style="background: #1a1a2e; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-        <h3 style="margin: 0 0 10px 0; color: #00D4FF; font-size: 16px;">🔍 Filter Data</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Get unique values for filters
     available_dates = sorted(df['Tanggal'].dropna().dt.date.unique(), reverse=True)
-    available_shifts = sorted(df['Shift'].dropna().unique().astype(str).tolist())
-    available_blok = sorted([str(b) for b in df['Blok'].dropna().unique() if pd.notna(b)])
-    available_alat = sorted([str(a) for a in df['Alat Muat'].dropna().unique() if pd.notna(a)])
-    available_hari = sorted([str(h) for h in df['Hari'].dropna().unique() if pd.notna(h)])
-    available_grid = sorted([str(g) for g in df['Grid'].dropna().unique() if pd.notna(g)])
-    
-    # Filter row - MORE FILTERS
-    filter_cols = st.columns([2, 2, 2, 2, 1])
     
     # Retrieve Global Filters (if any)
     global_filters = st.session_state.get('global_filters', {})
     global_date_range = global_filters.get('date_range')
-    global_shift = global_filters.get('shift')
+    
+    filter_cols = st.columns([3, 1])
     
     with filter_cols[0]:
         st.markdown("**📅 Tanggal**")
-        # Default to Global Filter End Date if available and in list, else latest available
         default_date = available_dates[0] if available_dates else datetime.now().date()
         
         if global_date_range and isinstance(global_date_range, tuple) and len(global_date_range) > 1:
-            # User usually wants to see the specific date they selected. 
-            # Since Daily Plan is single-day, we pick the END date of the range (latest).
             target_date = global_date_range[1]
             if target_date in available_dates:
                 default_date = target_date
@@ -891,152 +874,29 @@ def show_daily_plan():
             selected_date = datetime.now().date()
     
     with filter_cols[1]:
-        st.markdown("**⏰ Shift**")
-        shift_options = ['Semua'] + available_shifts
-        
-        # Sync with Global Shift
-        default_shifts = ['Semua']
-        if global_shift and global_shift != "All Displatch":
-            # Normalize Global Shift "Shift 1" -> "1"
-            g_shift_str = str(global_shift).replace("Shift ", "").strip()
-            if g_shift_str in available_shifts:
-                default_shifts = [g_shift_str]
-        
-        selected_shifts = st.multiselect(
-            "Shift",
-            options=shift_options,
-            default=default_shifts,
-            key='dp_shift',
-            label_visibility="collapsed"
-        )
-        if len(selected_shifts) == 0:
-            selected_shifts = ['Semua']
-    
-    with filter_cols[2]:
-        st.markdown("**📍 Blok**")
-        blok_options = ['Semua'] + available_blok
-        selected_bloks = st.multiselect(
-            "Blok",
-            options=blok_options,
-            default=['Semua'],
-            key='dp_blok',
-            label_visibility="collapsed"
-        )
-        if len(selected_bloks) == 0:
-            selected_bloks = ['Semua']
-    
-    with filter_cols[3]:
-        st.markdown("**🚜 Alat Muat**")
-        alat_options = ['Semua'] + available_alat
-        selected_alat = st.multiselect(
-            "Alat Muat",
-            options=alat_options,
-            default=['Semua'],
-            key='dp_alat',
-            label_visibility="collapsed"
-        )
-        if len(selected_alat) == 0:
-            selected_alat = ['Semua']
-    
-    with filter_cols[4]:
         st.markdown("**🔄 Refresh**")
         if st.button("🔄 Refresh", use_container_width=True, key='dp_refresh'):
             st.cache_data.clear()
             st.rerun()
     
-    # Second row of filters
-    filter_cols2 = st.columns([2, 2, 2, 2, 2, 1])
-    
-    with filter_cols2[0]:
-        st.markdown("**📅 Hari**")
-        hari_options = ['Semua'] + available_hari
-        selected_hari = st.multiselect(
-            "Hari",
-            options=hari_options,
-            default=['Semua'],
-            key='dp_hari',
-            label_visibility="collapsed"
-        )
-        if len(selected_hari) == 0:
-            selected_hari = ['Semua']
-    
-    with filter_cols2[1]:
-        st.markdown("**📍 Grid**")
-        grid_options = ['Semua'] + available_grid[:20]  # Limit to first 20
-        
-        # Sync with Global Front (which is often Grid)
-        global_front = global_filters.get('front')
-        default_grids = ['Semua']
-        
-        if global_front and len(global_front) > 0:
-            # Filter valid grids from global selection
-            valid_global_fronts = [g for g in global_front if str(g) in available_grid]
-            if valid_global_fronts:
-                default_grids = valid_global_fronts
-        
-        selected_grids = st.multiselect(
-            "Grid",
-            options=grid_options,
-            default=default_grids,
-            key='dp_grid',
-            label_visibility="collapsed"
-        )
-        if len(selected_grids) == 0:
-            selected_grids = ['Semua']
-    
-    with filter_cols2[2]:
-        st.markdown("**🪨 Material**")
-        material_options = ['Semua', 'Batu Kapur', 'Silika', 'Clay']
-        selected_material = st.multiselect(
-            "Material",
-            options=material_options,
-            default=['Semua'],
-            key='dp_material',
-            label_visibility="collapsed"
-        )
+    # Set default values for removed filters (needed by downstream code)
+    selected_shifts = ['Semua']
+    selected_bloks = ['Semua']
+    selected_grids = ['Semua']
+    selected_hari = ['Semua']
+    selected_alat = ['Semua']
+    selected_alat_angkut = ['Semua']
+    selected_rom = ['Semua']
+    selected_material = ['Semua']
     
     # ============================================================
     # APPLY FILTERS
     # ============================================================
     df_filtered = df.copy()
     
-    # Date filter
+    # Date filter (only active filter)
     if 'Tanggal' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['Tanggal'].dt.date == selected_date]
-    
-    # Shift filter
-    if selected_shifts and 'Semua' not in selected_shifts:
-        df_filtered = df_filtered[df_filtered['Shift'].astype(str).isin(selected_shifts)]
-    
-    # Blok filter
-    if selected_bloks and 'Semua' not in selected_bloks and 'Blok' in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered['Blok'].astype(str).isin(selected_bloks)]
-    
-    # Hari filter
-    if selected_hari and 'Semua' not in selected_hari and 'Hari' in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered['Hari'].astype(str).isin(selected_hari)]
-    
-    # Grid filter
-    if selected_grids and 'Semua' not in selected_grids and 'Grid' in df_filtered.columns:
-        # Convert both to string for comparison and handle potential NaNs
-        df_filtered = df_filtered[df_filtered['Grid'].fillna('').astype(str).isin(selected_grids)]
-    
-    # Alat Muat filter
-    if selected_alat and 'Semua' not in selected_alat and 'Alat Muat' in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered['Alat Muat'].astype(str).isin(selected_alat)]
-    
-    # Material filter
-    if 'Semua' not in selected_material and selected_material:
-
-        material_mask = pd.Series(False, index=df_filtered.index)
-        for mat in selected_material:
-            if mat == 'Batu Kapur' and 'Batu Kapur' in df_filtered.columns:
-                material_mask = material_mask | df_filtered['Batu Kapur'].notna()
-            elif mat == 'Silika' and 'Silika' in df_filtered.columns:
-                material_mask = material_mask | df_filtered['Silika'].notna()
-            elif mat == 'Clay' and 'Clay' in df_filtered.columns:
-                material_mask = material_mask | df_filtered['Clay'].notna()
-        df_filtered = df_filtered[material_mask]
     
     # ============================================================
     # KPI METRICS (Revised: Production & Fleet Focus)
@@ -1069,20 +929,29 @@ def show_daily_plan():
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #FFD70044;">
             <div style="font-size: 28px; font-weight: bold; color: #FFD700;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Excavator Aktif</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Alat Muat</div>
         </div>
         """.format(active_exc), unsafe_allow_html=True)
     
     with kpi_cols[2]:
-        active_hauler = df_filtered['Alat Angkut'].dropna().nunique() if 'Alat Angkut' in df_filtered.columns else 0
+        # Parse "1 HD" -> 1, "4 Scania" -> 4, sum all to get total hauler units
+        import re
+        total_hauler = 0
+        if 'Alat Angkut' in df_filtered.columns:
+            for val in df_filtered['Alat Angkut'].dropna():
+                match = re.match(r'^(\d+)', str(val).strip())
+                if match:
+                    total_hauler += int(match.group(1))
+                else:
+                    total_hauler += 1  # If no number prefix, count as 1 unit
         st.markdown("""
         <div style="background: linear-gradient(135deg, #FFA50022, #FFA50011); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #FFA50044;">
             <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Hauler (DT) Aktif</div>
+            <div style="font-size: 12px; color: #B0B0B0;">Alat Angkut</div>
         </div>
-        """.format(active_hauler), unsafe_allow_html=True)
+        """.format(total_hauler), unsafe_allow_html=True)
     
     with kpi_cols[3]:
         # FIX: KPI counts distinct PHYSICAL LOCATIONS (User confirmed: multiple labels at 1 point = 1 location)

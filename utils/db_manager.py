@@ -15,6 +15,14 @@ except ImportError:
 # Get DB URL
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Fallback: Check Streamlit Secrets (for Cloud Deployment)
+if not DATABASE_URL:
+    try:
+        if "DATABASE_URL" in st.secrets:
+            DATABASE_URL = st.secrets["DATABASE_URL"]
+    except Exception:
+        pass
+
 # Singleton engine
 _message_printed = False
 # _message_printed = False

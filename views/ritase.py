@@ -258,27 +258,59 @@ def show_ritase():
 
     with col_right:
         with st.container(border=True):
-            st.markdown("##### 🚛 **EFISIENSI ARMADA** | Top Unit")
+            st.markdown("##### 🚛 **DISTRIBUSI ARMADA** | Ritase per Jumlah Unit")
             st.markdown("---")
             
             if 'Dump Truck' in df_prod.columns:
-                # Top 10 Only to save space
-                truck_perf = df_prod.groupby('Dump Truck')['Rit'].sum().reset_index().sort_values('Rit', ascending=True)
-                if len(truck_perf) > 10: truck_perf = truck_perf.tail(10) 
+                # Group by number of DT units: sum ritase, count frequency, sum DT deployed
+                truck_perf = df_prod.groupby('Dump Truck').agg(
+                    Rit=('Rit', 'sum'),
+                    Frekuensi=('Rit', 'count'),
+                    Total_DT=('Dump Truck', lambda x: pd.to_numeric(x, errors='coerce').sum())
+                ).reset_index()
                 
-                # Ensure it's treated as categorical string and add prefix if it looks like a number
-                truck_perf['Dump Truck'] = truck_perf['Dump Truck'].astype(str).apply(lambda x: f"DT-{x}" if x.replace('.','').isdigit() else x)
+                # Avg ritase per session
+                truck_perf['Avg_Rit'] = (truck_perf['Rit'] / truck_perf['Frekuensi']).round(1)
+                
+                # Sort by total ritase (highest on top = professional standard)
+                truck_perf = truck_perf.sort_values('Rit', ascending=True)
+                if len(truck_perf) > 10: truck_perf = truck_perf.tail(10)
+                
+                # Label: "X Unit (Nx)" format — shows config + frequency
+                truck_perf['Label'] = truck_perf.apply(
+                    lambda r: f"{int(float(r['Dump Truck']))} Unit ({int(r['Frekuensi'])}x)" 
+                    if str(r['Dump Truck']).replace('.','').isdigit() else str(r['Dump Truck']),
+                    axis=1
+                )
+                
+                # Rich hover tooltip
+                truck_perf['Hover'] = truck_perf.apply(
+                    lambda r: (
+                        f"Konfigurasi: {int(float(r['Dump Truck']))} Dump Truck<br>"
+                        f"Total Ritase: {int(r['Rit'])}<br>"
+                        f"Frekuensi: {int(r['Frekuensi'])}x sesi<br>"
+                        f"Total DT Deployed: {int(r['Total_DT'])} unit<br>"
+                        f"Rata-rata Rit/Sesi: {r['Avg_Rit']}"
+                    ), axis=1
+                )
                     
-                # Industrial Gold Theme
-                fig_truck = px.bar(truck_perf, y='Dump Truck', x='Rit', orientation='h',
-                             text_auto='.0f',
-                             color_discrete_sequence=['#d4a84b']) # Solid Gold
+                # Industrial Gold Theme with rich hover
+                fig_truck = go.Figure(go.Bar(
+                    y=truck_perf['Label'],
+                    x=truck_perf['Rit'],
+                    orientation='h',
+                    text=truck_perf['Rit'].apply(lambda x: f'{x:,.0f}'),
+                    textposition='auto',
+                    hovertext=truck_perf['Hover'],
+                    hoverinfo='text',
+                    marker_color='#d4a84b'
+                ))
                 
                 fig_truck.update_layout(**get_chart_layout(height=350))
                 fig_truck.update_layout(
                     xaxis_title="Total Ritase",
-                    yaxis_title="Unit Truck", # Explicit Label as requested
-                    yaxis=dict(type='category'), # Force categorical
+                    yaxis_title="Jumlah Dump Truck",
+                    yaxis=dict(type='category'),
                     margin=dict(t=20, b=0, l=0, r=0)
                 )
                 st.plotly_chart(fig_truck, use_container_width=True)
