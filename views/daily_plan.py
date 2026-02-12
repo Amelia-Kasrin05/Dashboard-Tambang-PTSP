@@ -898,11 +898,6 @@ def show_daily_plan():
     if 'Tanggal' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['Tanggal'].dt.date == selected_date]
     
-    # ============================================================
-    # KPI METRICS (Revised: Production & Fleet Focus)
-    # ============================================================
-    st.markdown("---")
-    
     # Calculate Total Target (Ton)
     total_target = 0
     mat_cols = ['Batu Kapur', 'Silika', 'Clay']
@@ -913,28 +908,27 @@ def show_daily_plan():
     kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
-        st.markdown("""
+        st.markdown(f"""
         <div style="background: linear-gradient(135deg, #00D4FF22, #00D4FF11); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #00D4FF44;">
-            <div style="font-size: 28px; font-weight: bold; color: #00D4FF;">{:,.0f}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Total Target (Ton)</div>
+            <div style="font-size: 28px; font-weight: bold; color: #00D4FF;">{total_target:,.0f}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">TOTAL TARGET PRODUKSI (TON)</div>
         </div>
-        """.format(total_target), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with kpi_cols[1]:
         active_exc = df_filtered['Alat Muat'].dropna().nunique() if 'Alat Muat' in df_filtered.columns else 0
-        st.markdown("""
+        st.markdown(f"""
         <div style="background: linear-gradient(135deg, #FFD70022, #FFD70011); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #FFD70044;">
-            <div style="font-size: 28px; font-weight: bold; color: #FFD700;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Alat Muat</div>
+            <div style="font-size: 28px; font-weight: bold; color: #FFD700;">{active_exc}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">TOTAL ALAT MUAT (UNIT)</div>
         </div>
-        """.format(active_exc), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with kpi_cols[2]:
-        # Parse "1 HD" -> 1, "4 Scania" -> 4, sum all to get total hauler units
         import re
         total_hauler = 0
         if 'Alat Angkut' in df_filtered.columns:
@@ -943,37 +937,31 @@ def show_daily_plan():
                 if match:
                     total_hauler += int(match.group(1))
                 else:
-                    total_hauler += 1  # If no number prefix, count as 1 unit
-        st.markdown("""
+                    total_hauler += 1
+        st.markdown(f"""
         <div style="background: linear-gradient(135deg, #FFA50022, #FFA50011); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #FFA50044;">
-            <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Alat Angkut</div>
+            <div style="font-size: 28px; font-weight: bold; color: #FFA500;">{total_hauler}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">TOTAL ALAT ANGKUT (UNIT)</div>
         </div>
-        """.format(total_hauler), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with kpi_cols[3]:
-        # FIX: KPI counts distinct PHYSICAL LOCATIONS (User confirmed: multiple labels at 1 point = 1 location)
-        # Map may show 6 labels (due to multiple fleets), but KPI should show 5 locations.
+        active_grids = 0
         if 'Grid' in df_filtered.columns and 'Blok' in df_filtered.columns:
-             # Create temp df for calculation
              df_kpi = df_filtered.copy()
-             # Use shared helper
              df_kpi['lokasi_id'] = df_kpi.apply(resolve_location_id, axis=1)
-             # Count unique PHYSICAL LOCATIONS
              active_grids = df_kpi['lokasi_id'].dropna().nunique()
-        else:
-             active_grids = 0
 
-        st.markdown("""
+        st.markdown(f"""
         <div style="background: linear-gradient(135deg, #00FF8822, #00FF8811); 
                     padding: 15px; border-radius: 10px; text-align: center;
                     border: 1px solid #00FF8844;">
-            <div style="font-size: 28px; font-weight: bold; color: #00FF88;">{}</div>
-            <div style="font-size: 12px; color: #B0B0B0;">Lokasi Aktif</div>
+            <div style="font-size: 28px; font-weight: bold; color: #00FF88;">{active_grids}</div>
+            <div style="font-size: 12px; color: #B0B0B0;">TOTAL LOKASI AKTIF</div>
         </div>
-        """.format(active_grids), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     

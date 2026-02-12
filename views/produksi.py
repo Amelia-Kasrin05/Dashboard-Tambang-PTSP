@@ -98,13 +98,23 @@ def show_produksi():
     # ----------------------------------------
     # 3. KPI CARDS
     # ----------------------------------------
+    # Calculate Average Production (Ton/Day)
+    unique_days = df_prod['Date'].nunique()
+    avg_prod_daily = (total_prod / unique_days) if unique_days > 0 else 0
+
     st.markdown(f"""
-    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">⛏️</div>
             <div class="kpi-label">Total Galian (Produksi)</div>
             <div class="kpi-value">{total_prod:,.0f}</div>
             <div class="kpi-subtitle">Ton Material</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">📈</div>
+            <div class="kpi-label">Rata-rata Harian</div>
+            <div class="kpi-value">{avg_prod_daily:,.0f}</div>
+            <div class="kpi-subtitle">Ton/Hari</div>
         </div>
         <div class="kpi-card" style="--card-accent: {status_color};">
             <div class="kpi-icon">{status_icon}</div>

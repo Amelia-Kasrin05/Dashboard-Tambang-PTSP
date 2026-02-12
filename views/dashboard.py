@@ -151,13 +151,25 @@ def show_dashboard():
     
     # 3. DISPLAY KPI CARDS
     # ----------------------------------------
+    # Calculate Avg Production
+    avg_prod = 0
+    if not df_prod.empty:
+        unique_days = df_prod['Date'].nunique()
+        avg_prod = (kpi_prod / unique_days) if unique_days > 0 else 0
+
     st.markdown(f"""
-    <div class="kpi-grid">
+    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">⛏️</div>
             <div class="kpi-label">Total Produksi</div>
             <div class="kpi-value">{kpi_prod:,.0f} <span style="font-size:1rem;color:#64748b">ton</span></div>
             <div class="kpi-subtitle">Pencapaian: {ach_prod:.1f}% vs Rencana</div>
+        </div>
+        <div class="kpi-card" style="--card-accent: #10b981;">
+            <div class="kpi-icon">📈</div>
+            <div class="kpi-label">Rata-rata Harian</div>
+            <div class="kpi-value">{avg_prod:,.0f} <span style="font-size:1rem;color:#64748b">ton</span></div>
+            <div class="kpi-subtitle">Ton/Hari</div>
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
             <div class="kpi-icon">🚢</div>
