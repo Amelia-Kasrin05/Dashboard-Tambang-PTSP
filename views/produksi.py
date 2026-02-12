@@ -102,25 +102,25 @@ def show_produksi():
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">⛏️</div>
-            <div class="kpi-label">Total Produksi</div>
+            <div class="kpi-label">Total Galian (Produksi)</div>
             <div class="kpi-value">{total_prod:,.0f}</div>
             <div class="kpi-subtitle">Ton Material</div>
         </div>
         <div class="kpi-card" style="--card-accent: {status_color};">
             <div class="kpi-icon">{status_icon}</div>
-            <div class="kpi-label">Pencapaian</div>
+            <div class="kpi-label">Realisasi vs Target</div>
             <div class="kpi-value">{achievement_pct:.1f}%</div>
             <div class="kpi-subtitle">Target: {target_period/1000:,.0f}k Ton</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
             <div class="kpi-icon">⚡</div>
-            <div class="kpi-label">Produktivitas</div>
+            <div class="kpi-label">Kecepatan Unit (Produktivitas)</div>
             <div class="kpi-value">{avg_speed:,.1f}</div>
             <div class="kpi-subtitle">Ton/Unit/Jam</div>
         </div>
         <div class="kpi-card" style="--card-accent: #d4a84b;">
             <div class="kpi-icon">🚛</div>
-            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-label">Total Angkutan (Ritase)</div>
             <div class="kpi-value">{total_rit:,.0f}</div>
             <div class="kpi-subtitle">Trip</div>
         </div>
@@ -218,7 +218,7 @@ def show_produksi():
     
     with c1:
         with st.container(border=True):
-             st.markdown("##### ⏱️ **IRAMA PER JAM (HOURLY RHYTHM)**")
+             st.markdown("##### ⏱️ **RATA-RATA PRODUKSI PER JAM (HOURLY)**")
              st.markdown("---")
 
              if not df_prod_valid_time.empty:
@@ -241,7 +241,7 @@ def show_produksi():
     
     with c2:
         with st.container(border=True):
-            st.markdown("##### 🌓 **SHIFT**")
+            st.markdown("##### 🌓 **KONTRIBUSI SHIFT (%)**")
             st.markdown("---")
             
             if 'Shift' in df_prod.columns:
@@ -270,7 +270,8 @@ def show_produksi():
     col_left, col_right = st.columns(2)
     with col_left:
         with st.container(border=True):
-            st.markdown("##### 🚜 **PERFORMA UNIT** | Top Excavator")
+            st.markdown("##### 🚜 **PRODUKSI PER UNIT EXCAVATOR**")
+            st.markdown("*Sumber: Total Tonnase per Excavator*")
             st.markdown("---")
             
             if not df_prod.empty:
@@ -287,7 +288,8 @@ def show_produksi():
     
     with col_right:
         with st.container(border=True):
-            st.markdown("##### 📍 **SUMBER (FRONT)** | Distribusi Front")
+            st.markdown("##### 📍 **PRODUKSI PER LOKASI (FRONT)**")
+            st.markdown("*Sumber: Total Tonnase per Front*")
             st.markdown("---")
             
             if 'Front' in df_prod.columns and not df_prod.empty:
@@ -307,7 +309,8 @@ def show_produksi():
     
     # ROW 4: Disposal Analysis
     with st.container(border=True):
-        st.markdown("##### 🚛 **TUJUAN (DISPOSAL)** | Distribusi Disposal")
+        st.markdown("##### 🚛 **DISTRIBUSI LOKASI BUANG (DISPOSAL)**")
+        st.markdown("*Sumber: Total Tonnase per Dump Location*")
         st.markdown("---")
         
         if 'Dump Loc' in df_prod.columns and not df_prod.empty:

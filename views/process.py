@@ -74,9 +74,9 @@ def show_process():
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">📉</div>
-            <div class="kpi-label">Total Volume</div>
+            <div class="kpi-label">Total Ritase</div>
             <div class="kpi-value">{total_rit:,.0f}</div>
-            <div class="kpi-subtitle">Total Ritase</div>
+            <div class="kpi-subtitle">Total Trip</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
             <div class="kpi-icon">⚡</div>
@@ -91,10 +91,10 @@ def show_process():
             <div class="kpi-subtitle">{format_number(best_shift_val)} Rit</div>
         </div>
         <div class="kpi-card" style="--card-accent: #f59e0b;">
-            <div class="kpi-icon">🚜</div>
-            <div class="kpi-label">Armada Aktif</div>
+            <div class="kpi-icon">🏭</div>
+            <div class="kpi-label">Titik Dumping Aktif</div>
             <div class="kpi-value">{active_loaders}</div>
-            <div class="kpi-subtitle">Loader / {active_haulers} Hauler</div>
+            <div class="kpi-subtitle">Lokasi / {active_haulers} Jenis Unit</div>
         </div>
     </div>
     """
@@ -126,7 +126,7 @@ def show_process():
         hourly_rit, 
         x='Jam', 
         y='Ritase',
-        title="<b>📈 Pergerakan Per Jam (Hourly Rhythm)</b><br><span style='font-size: 12px; color: gray;'>Irama Operasi (Ritase per Jam)</span>",
+        title="<b>📈 TREN RITASE PER JAM (HOURLY)</b><br><span style='font-size: 12px; color: gray;'>Irama Operasi (Ritase per Jam)</span>",
         labels={'Jam': 'Jam Operasi', 'Ritase': 'Ritase'},
         color_discrete_sequence=['#3b82f6']
     )
@@ -146,7 +146,7 @@ def show_process():
         chart_shift_perf, 
         x='Shift', 
         y='Ritase',
-        title="<b>📊 Performa Antar Shift</b><br><span style='font-size: 12px; color: gray;'>Perbandingan Produktivitas Regu</span>",
+        title="<b>📊 KONTRIBUSI SHIFT (RITASE)</b><br><span style='font-size: 12px; color: gray;'>Perbandingan Produktivitas Regu</span>",
         text='Ritase',
         color='Shift',
         color_discrete_map=SHIFT_COLORS
@@ -162,7 +162,7 @@ def show_process():
         unit_perf,
         y='Dumping',
         x='Ritase',
-        title="<b>🚜 Peringkat Loader (Dumping)</b><br><span style='font-size: 12px; color: gray;'>Kontribusi per Alat Muat (Dumping)</span>",
+        title="<b>🏭 Peringkat Titik Dumping (Hopper)</b><br><span style='font-size: 12px; color: gray;'>Kontribusi per Lokasi Dumping</span>",
         orientation='h',
         text='Ritase',
         color_discrete_sequence=['#10b981']
@@ -179,7 +179,7 @@ def show_process():
         hauler_share,
         names='Unit',
         values='Ritase',
-        title="<b>🚚 Proporsi Vendor/Unit</b><br><span style='font-size: 12px; color: gray;'>Porsi Ritase per Grup Unit</span>",
+        title="<b>🚚 KONTRIBUSI VENDOR / UNIT ANGKUT</b><br><span style='font-size: 12px; color: gray;'>Porsi Ritase per Grup Unit</span>",
         hole=0.4,
         color_discrete_sequence=px.colors.qualitative.Safe
     )

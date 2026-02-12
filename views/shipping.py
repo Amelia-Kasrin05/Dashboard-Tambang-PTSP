@@ -57,9 +57,8 @@ def show_shipping():
 
     # Metrics
     total_qty = df['Quantity'].sum()
-    # Hitung Transaksi: Hitung semua laporan masuk (termasuk 0/nihil)
-    # User ingin melihat bahwa input mereka (meski 0) masuk ke sistem
-    total_rit = len(df)
+    # Total Transaksi: Hitung hanya baris yang Quantity > 0 (artinya ada pengiriman)
+    total_rit = len(df[df['Quantity'] > 0])
     
     # Calculate Material Totals
     total_ls = df['ap_ls'].sum()
@@ -78,25 +77,25 @@ def show_shipping():
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">🚢</div>
-            <div class="kpi-label">Total Pengiriman</div>
+            <div class="kpi-label">TOTAL PENGIRIMAN (TONASE)</div>
             <div class="kpi-value">{total_qty:,.0f}</div>
             <div class="kpi-subtitle">Ton Material</div>
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
             <div class="kpi-icon">📋</div>
-            <div class="kpi-label">Total Transaksi</div>
+            <div class="kpi-label">TOTAL PENGIRIMAN (RITASE)</div>
             <div class="kpi-value">{total_rit:,}</div>
             <div class="kpi-subtitle">Jumlah Pengiriman</div>
         </div>
         <div class="kpi-card" style="--card-accent: #f59e0b;">
             <div class="kpi-icon">📅</div>
-            <div class="kpi-label">Rata-rata Harian</div>
+            <div class="kpi-label">RATA-RATA KIRIM (HARIAN)</div>
             <div class="kpi-value">{avg_daily:,.0f}</div>
             <div class="kpi-subtitle">Ton / Hari</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
             <div class="kpi-icon">💎</div>
-            <div class="kpi-label">Material Terbanyak</div>
+            <div class="kpi-label">PRODUK DOMINAN</div>
             <div class="kpi-value" style="font-size: 1.5rem;">{dominant_mat}</div>
             <div class="kpi-subtitle">{dominant_val:,.0f} Ton</div>
         </div>
@@ -109,7 +108,7 @@ def show_shipping():
     # Chart 1: Material Composition (Donut)
     with c1:
         with st.container(border=True):
-            st.markdown("##### 📦 **KOMPOSISI MATERIAL** | Jenis Produk")
+            st.markdown("##### 📦 **KOMPOSISI MATERIAL KIRIM** | Jenis Produk")
             st.markdown("---")
             
             mat_df = pd.DataFrame([
@@ -130,7 +129,7 @@ def show_shipping():
             # Fix Layout Merge
             layout_mat = get_chart_layout(height=350)
             layout_mat.update(dict(
-                title="Proporsi Material",
+                title="Proporsi Material Kirim",
                 showlegend=True,
                 legend=dict(orientation="h", y=-0.1)
             ))
@@ -141,7 +140,7 @@ def show_shipping():
     # Chart 2: Shift Performance (Bar)
     with c2:
         with st.container(border=True):
-            st.markdown("##### ⏱️ **PERFORMA SHIFT** | Produktivitas Kerja")
+            st.markdown("##### ⏱️ **KONTRIBUSI SHIFT (PENGIRIMAN)** | Produktivitas Kerja")
             st.markdown("---")
             
             shift_df = df.groupby('Shift')['Quantity'].sum().reset_index()
@@ -171,7 +170,7 @@ def show_shipping():
     
     # Chart 3: Daily Trend (Stacked)
     with st.container(border=True):
-        st.markdown("##### 📈 **TREN HARIAN** | Fluktuasi per Material")
+        st.markdown("##### 📈 **TREN PENGIRIMAN HARIAN** | Fluktuasi per Material")
         st.markdown("---")
         
         # Melt for Stacked Bar (Use lowercase columns)
@@ -190,20 +189,20 @@ def show_shipping():
                                   'Silica Stone': '#10b981'
                            })
         
-        # Add Moving Average Line (Total)
-        total_series = df.groupby('Date')['Quantity'].sum().reset_index()
-        total_series['MA7'] = total_series['Quantity'].rolling(window=7).mean()
+        # Add Moving Average Line (Total) - REMOVED per user request
+        # total_series = df.groupby('Date')['Quantity'].sum().reset_index()
+        # total_series['MA7'] = total_series['Quantity'].rolling(window=7).mean()
         
-        fig_trend.add_trace(go.Scatter(
-            x=total_series['Date'], y=total_series['MA7'],
-            name='Rata-rata 7 Hari',
-            line=dict(color='#d4a84b', width=3)
-        ))
+        # fig_trend.add_trace(go.Scatter(
+        #     x=total_series['Date'], y=total_series['MA7'],
+        #     name='Rata-rata 7 Hari',
+        #     line=dict(color='#d4a84b', width=3)
+        # ))
 
         # Update Layout (Merge dicts to avoid duplicate 'legend' error)
         layout = get_chart_layout(height=400)
         layout.update(dict(
-            title="Tren Harian breakdown Material",
+            title="Tren Harian Pengiriman Material",
             xaxis_title="Tanggal",
             yaxis_title="Volume (Ton)",
             legend=dict(orientation="h", y=-0.25, x=0.5, xanchor="center"), # Move legend to bottom

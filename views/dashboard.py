@@ -161,15 +161,15 @@ def show_dashboard():
         </div>
         <div class="kpi-card" style="--card-accent: #10b981;">
             <div class="kpi-icon">🚢</div>
-            <div class="kpi-label">Total Pengiriman</div>
+            <div class="kpi-label">Total Pengiriman (Tonase)</div>
             <div class="kpi-value">{kpi_shipping:,.0f} <span style="font-size:1rem;color:#64748b">ton</span></div>
-            <div class="kpi-subtitle">Sales & Shipping</div>
+            <div class="kpi-subtitle">Material Terkirim</div>
         </div>
         <div class="kpi-card" style="--card-accent: #f59e0b;">
             <div class="kpi-icon">🏔️</div>
-            <div class="kpi-label">Total Stockpile</div>
-            <div class="kpi-value">{kpi_stockpile:,.0f} <span style="font-size:1rem;color:#64748b">ton</span></div>
-            <div class="kpi-subtitle">Inventory Balance</div>
+            <div class="kpi-label">Total Ritase Stockpile</div>
+            <div class="kpi-value">{kpi_stockpile:,.0f} <span style="font-size:1rem;color:#64748b">rit</span></div>
+            <div class="kpi-subtitle">Total Trip</div>
         </div>
         <div class="kpi-card" style="--card-accent: #ef4444;">
             <div class="kpi-icon">🛑</div>
@@ -324,7 +324,7 @@ def show_dashboard():
     
     with col_ops1:
         with st.container(border=True):
-            st.markdown("#### 🚜 Top 5 Excavator Performance")
+            st.markdown("#### 🚜 Top 5 Unit Excavator (Produksi Tertinggi)")
             if not df_prod.empty and 'Excavator' in df_prod.columns:
                 # Group by Excavator
                 exca_perf = df_prod.groupby('Excavator')['Tonnase'].sum().reset_index()
@@ -343,7 +343,7 @@ def show_dashboard():
                 
     with col_ops2:
         with st.container(border=True):
-            st.markdown("#### 📍 Ritase per Front (Lokasi)")
+            st.markdown("#### 📍 Ritase per Lokasi Kerja (Front)")
             # Use df_prod 'Front' if available, otherwise load_ritase_by_front?
             # df_prod usually has 'Front'. Let's check.
             data_source = pd.DataFrame()

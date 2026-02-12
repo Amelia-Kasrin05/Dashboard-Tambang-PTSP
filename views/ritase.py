@@ -120,25 +120,25 @@ def show_ritase():
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;">
         <div class="kpi-card" style="--card-accent: #d4a84b;">
             <div class="kpi-icon">🚛</div>
-            <div class="kpi-label">Total Ritase</div>
+            <div class="kpi-label">Total Angkutan (Ritase)</div>
             <div class="kpi-value">{total_rit:,.0f}</div>
-            <div class="kpi-subtitle">Ritase (Semua Shift)</div>
+            <div class="kpi-subtitle">Trip</div>
         </div>
         <div class="kpi-card" style="--card-accent: #3b82f6;">
             <div class="kpi-icon">📦</div>
-            <div class="kpi-label">Total Volume</div>
+            <div class="kpi-label">Total Material (Tonase)</div>
             <div class="kpi-value">{total_ton:,.0f}</div>
             <div class="kpi-subtitle">Ton Material</div>
         </div>
         <div class="kpi-card" style="--card-accent: {status_color};">
             <div class="kpi-icon">{status_icon}</div>
-            <div class="kpi-label">Pencapaian</div>
+            <div class="kpi-label">Realisasi vs Target</div>
             <div class="kpi-value">{achievement_pct:.1f}%</div>
             <div class="kpi-subtitle">Target: {target_period/1000:,.0f}k Ton</div>
         </div>
         <div class="kpi-card" style="--card-accent: #8b5cf6;">
             <div class="kpi-icon">⚖️</div>
-            <div class="kpi-label">Rata-rata Muatan</div>
+            <div class="kpi-label">Rata-rata Muatan (Payload)</div>
             <div class="kpi-value">{avg_load:.1f}</div>
             <div class="kpi-subtitle">Ton / Rit</div>
         </div>
@@ -150,7 +150,7 @@ def show_ritase():
     
     # ROW 1: Daily Trend with TARGET LINE
     with st.container(border=True):
-        st.markdown("##### 📈 **ANALISIS TREN** | Realisasi vs Target Harian")
+        st.markdown("##### 📈 **TREN HARIAN ANGKUTAN & MATERIAL**")
         st.markdown("---")
         
         # Aggregate Daily
@@ -211,7 +211,7 @@ def show_ritase():
     
     with col_left:
         with st.container(border=True):
-            st.markdown("##### ⏱️ **PRODUKTIVITAS PER JAM** | Rata-rata Tonase")
+            st.markdown("##### ⏱️ **RATA-RATA RITASE PER JAM (HOURLY)**")
             st.markdown("---")
             
             # Helper to extract hour
@@ -228,26 +228,27 @@ def show_ritase():
             valid_hours = df_prod[(df_prod['Hour'] >= 0) & (df_prod['Hour'] <= 23)]
             
             if not valid_hours.empty:
-                # Group by Hour: Sum Tonnase & Count Days to get Avg
-                hourly_perf = valid_hours.groupby('Hour')['Tonnase'].sum().reset_index()
-                hourly_perf['Avg_Ton_Hour'] = hourly_perf['Tonnase'] / total_days
+                # Group by Hour: Sum Ritase & Count Days to get Avg
+                hourly_perf = valid_hours.groupby('Hour')['Rit'].sum().reset_index()
+                hourly_perf['Avg_Rit_Hour'] = hourly_perf['Rit'] / total_days
                 
                 # Combo Chart: Avg Productivity
                 fig_h = go.Figure()
                 
                 fig_h.add_trace(go.Bar(
                     x=hourly_perf['Hour'],
-                    y=hourly_perf['Avg_Ton_Hour'],
-                    name='Rata-rata Ton/Jam',
-                    marker_color='#3b82f6', # Professional Blue (No Gradient/Rainbow)
-                    text=hourly_perf['Avg_Ton_Hour'],
-                    texttemplate='%{text:,.0f}',
-                    textposition='auto'
+                    y=hourly_perf['Avg_Rit_Hour'],
+                    name='Rata-rata Rit/Jam',
+                    marker_color='#3b82f6', # Professional Blue
+                    text=hourly_perf['Avg_Rit_Hour'],
+                    texttemplate='%{text:,.1f}',
+                    textposition='auto',
+                    hovertemplate='Jam %{x}: %{y:,.1f} Rit<extra></extra>'
                 ))
                 
                 fig_h.update_layout(
                     xaxis=dict(tickmode='linear', dtick=1, title="Jam Operasional"),
-                    yaxis=dict(title="Rata-rata Produksi (Ton)"),
+                    yaxis=dict(title="Rata-rata Produksi (Ritase)"),
                     showlegend=False,
                     margin=dict(t=20, b=0, l=0, r=0)
                 )
@@ -258,7 +259,7 @@ def show_ritase():
 
     with col_right:
         with st.container(border=True):
-            st.markdown("##### 🚛 **DISTRIBUSI ARMADA** | Ritase per Jumlah Unit")
+            st.markdown("##### 🚛 **KINERJA FORMASI ARMADA (FLEET)**")
             st.markdown("---")
             
             if 'Dump Truck' in df_prod.columns:
@@ -322,7 +323,7 @@ def show_ritase():
     
     with c1:
         with st.container(border=True):
-            st.markdown("##### 📍 **SOURCE** | Distribusi Front")
+            st.markdown("##### 📍 **DISTRIBUSI LOKASI (FRONT)**")
             st.markdown("---")
             
             if 'Front' in df_prod.columns or 'BLOK' in df_prod.columns:
@@ -342,7 +343,7 @@ def show_ritase():
 
     with c2:
         with st.container(border=True):
-            st.markdown("##### 🌓 **SHIFT** | Proporsi Shift")
+            st.markdown("##### 🌓 **KONTRIBUSI SHIFT (%)**")
             st.markdown("---")
              
             if 'Shift' in df_prod.columns:
