@@ -397,36 +397,28 @@ def show_dashboard():
             
         if len(dates) > 0:
             recap_df = pd.DataFrame({'Date': sorted(dates)})
+            # Standardize Header Key to Datetime64
+            recap_df['Date'] = pd.to_datetime(recap_df['Date'])
             
             # Merge Production
             if not df_prod.empty:
                 d_prod = df_prod.groupby('Date')['Tonnase'].sum().reset_index()
+                d_prod['Date'] = pd.to_datetime(d_prod['Date']) # Ensure Key is Datetime
                 recap_df = pd.merge(recap_df, d_prod, on='Date', how='left')
                 recap_df.rename(columns={'Tonnase': 'Produksi (Ton)'}, inplace=True)
                 
             # Merge Shipping
             if not df_shipping.empty:
                 d_ship = df_shipping.groupby('Date')['Quantity'].sum().reset_index()
+                d_ship['Date'] = pd.to_datetime(d_ship['Date']) # Ensure Key is Datetime
                 recap_df = pd.merge(recap_df, d_ship, on='Date', how='left')
                 recap_df.rename(columns={'Quantity': 'Pengiriman (Ton)'}, inplace=True)
                 
             # Merge Stockpile Activity
-            # Note: Stockpile 'Date' might need care if it's snapshot only. 
-            # Assuming df_stockpile has 'Tanggal' mapped to 'Date' in loader
-            # But wait, df_stockpile from previous step might rely on 'Date' column.
-            # Let's check df_stockpile columns first.
             if not df_stockpile.empty and 'Tanggal' in df_stockpile.columns:
-                 # Rename for consistency if needed, but apply_global_filters uses 'Date'
-                 # Loader returns 'Tanggal'. Let's ensure consistency.
-                 # Ah, apply_global_filters was called on df_stockpile? No, it was skipped/commented or done?
-                 # In Step 1: df_stockpile = load_stockpile_hopper() -> apply_global_filters NOT CALLLED on it for Date.
-                 # Because Stockpile is usually snapshot.
-                 # However, for Activity Log (Ritase), it IS historical.
-                 # So we SHOULD aggregate it by Date if available.
-                 
                  d_stock = df_stockpile.copy()
                  if 'Tanggal' in d_stock.columns:
-                     d_stock['Date'] = pd.to_datetime(d_stock['Tanggal'])
+                     d_stock['Date'] = pd.to_datetime(d_stock['Tanggal']) # Ensure Key is Datetime
                      d_stock = d_stock.groupby('Date')['Ritase'].sum().reset_index()
                      recap_df = pd.merge(recap_df, d_stock, on='Date', how='left')
                      recap_df.rename(columns={'Ritase': 'Stockpile Activity (Rit)'}, inplace=True)
@@ -438,7 +430,12 @@ def show_dashboard():
                     df_gangguan['Date'] = pd.to_datetime(df_gangguan['Tanggal'])
                 
                 if 'Date' in df_gangguan.columns:
-                    d_down = df_gangguan.groupby('Date')['Durasi'].sum().reset_index()
+                    # Clean date type for grouping
+                    df_gangguan['Date'] = pd.to_datetime(df_gangguan['Date'], errors='coerce')
+                    
+                    d_down = df_gangguan.groupby(df_gangguan['Date'].dt.normalize())['Durasi'].sum().reset_index()
+                    d_down['Date'] = pd.to_datetime(d_down['Date']) # Ensure Key is Datetime
+                    
                     recap_df = pd.merge(recap_df, d_down, on='Date', how='left')
                     recap_df.rename(columns={'Durasi': 'Downtime (Jam)'}, inplace=True)
             

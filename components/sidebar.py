@@ -161,9 +161,8 @@ def render_sidebar():
         # 1. Date Range
         from datetime import date
         today = date.today()
-        # Default start date: Jan 1, 2026 (Safe default since data ends in Jan 26)
-        # Optimized loaders handle this range easily now.
-        default_start = date(2026, 1, 1)
+        # Default start date: First Day of Current Month (User Request)
+        default_start = date(today.year, today.month, 1)
         
         # Initialize session state for filters if not exists
         if 'global_filters' not in st.session_state:
@@ -177,9 +176,9 @@ def render_sidebar():
 
         with st.expander("🔍 Global Filters", expanded=True):
             # Reset Button
-            if st.button("♻️ Reset Filter (Jan 26+)", use_container_width=True, help="Kembalikan filter ke Awal Tahun 2026"):
+            if st.button("♻️ Reset Filter (Bulan Ini)", use_container_width=True, help="Kembalikan filter ke Bulan Ini"):
                  st.session_state.global_filters = {
-                    'date_range': (date(2026, 1, 1), today),
+                    'date_range': (default_start, today),
                     'shift': 'All Displatch',
                     'front': [],
                     'excavator': [],

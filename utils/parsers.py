@@ -1,6 +1,6 @@
 import pandas as pd
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
 # ============================================================
 # PARSING HELPERS
@@ -19,8 +19,29 @@ def parse_excel_date(date_value):
             date_result = excel_epoch + timedelta(days=int(date_value))
             return date_result.date()
         return None
+        return None
     except Exception:
         return None
+
+def parse_excel_time(time_val):
+    try:
+        if pd.isna(time_val): return None
+        # Handle Excel Serial Date (Float) -> Time/Datetime Object
+        if isinstance(time_val, (int, float)):
+             # Excel base date
+             excel_epoch = datetime(1899, 12, 30)
+             dt = excel_epoch + timedelta(days=float(time_val))
+             return dt # Return datetime object (1899-...) which pandas handles fine
+        
+        # Handle Strings
+        if isinstance(time_val, str):
+             return time_val.strip()
+
+        if isinstance(time_val, time):
+             return time_val.strftime("%H:%M:%S")
+             
+        return time_val
+    except: return None
 
 def safe_parse_date_column(date_series):
     return date_series.apply(parse_excel_date)
@@ -47,7 +68,11 @@ def normalize_excavator_column(df):
 
 def parse_production_data(source):
     try:
-        xls = pd.ExcelFile(source)
+        try:
+            xls = pd.ExcelFile(source, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            xls = pd.ExcelFile(source)
         valid_dfs = []
         target_sheets = [s for s in xls.sheet_names if '2026' in str(s)]
         if not target_sheets:
@@ -143,7 +168,11 @@ def parse_production_data(source):
 
 def parse_downtime_data(source):
     try:
-        xls = pd.ExcelFile(source)
+        try:
+            xls = pd.ExcelFile(source, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            xls = pd.ExcelFile(source)
         sheet_names = xls.sheet_names
         
         target_sheets = []
@@ -205,6 +234,12 @@ def parse_downtime_data(source):
                 # Numerics & Time
                 df_sheet['Durasi'] = pd.to_numeric(df_sheet['Durasi'], errors='coerce').fillna(0.0)
                 
+                # Fix Time Parsing (Start/End)
+                if 'Start' in df_sheet.columns:
+                    df_sheet['Start'] = df_sheet['Start'].apply(parse_excel_time)
+                if 'End' in df_sheet.columns:
+                    df_sheet['End'] = df_sheet['End'].apply(parse_excel_time)
+                
                 all_dfs.append(df_sheet)
             except: continue
         
@@ -220,7 +255,11 @@ def parse_downtime_data(source):
 # ============================================================
 def parse_stockpile_hopper(source):
     try:
-        xls = pd.ExcelFile(source)
+        try:
+            xls = pd.ExcelFile(source, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            xls = pd.ExcelFile(source)
         # Use exact sheet name
         if 'Stockpile Hopper' not in xls.sheet_names:
             return pd.DataFrame()
@@ -373,7 +412,12 @@ def parse_shipping_data(source):
     try:
         if hasattr(source, 'seek'):
             source.seek(0)
-        xls = pd.ExcelFile(source)
+        try:
+            xls = pd.ExcelFile(source, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            xls = pd.ExcelFile(source)
+            
         # Use exact sheet name with trailing space
         target_sheet = 'TONASE Pengiriman '
         if target_sheet not in xls.sheet_names:
@@ -381,119 +425,85 @@ def parse_shipping_data(source):
             if 'TONASE Pengiriman' in xls.sheet_names:
                 target_sheet = 'TONASE Pengiriman'
             else:
-                print(f"[DEBUG] Shipping Sheet not found. Available: {xls.sheet_names}")
                 return pd.DataFrame()
         
         # Read full sheet to scan horizontal blocks
         # Header is typically at row index 2 (Excel Row 3)
         df_raw = pd.read_excel(xls, sheet_name=target_sheet, header=None)
         
-        # Find 2026 Block
-        found_col_idx = None
         header_row_idx = 2  # Confirmed by debug
-        
         scan_limit_col = df_raw.shape[1]
+        
+        found_dfs = []
         
         for c in range(scan_limit_col):
             val = str(df_raw.iloc[header_row_idx, c]).strip().lower()
             if 'tanggal' == val:
-                # Potential block found. Check date in rows below.
-                # Check next 5 rows
-                for r in range(header_row_idx + 1, min(header_row_idx + 10, len(df_raw))):
-                    try:
-                        date_val = df_raw.iloc[r, c]
-                        dt = pd.to_datetime(date_val)
-                        if dt.year >= 2026:
-                            found_col_idx = c
-                            print(f"Found Shipping 2026 Block at Col {c}")
-                            break
-                    except:
-                        continue
-                if found_col_idx is not None:
-                    break
-        
-        if found_col_idx is not None:
-             print(f"[DEBUG] Shipping Header found at Column {found_col_idx}")
-        else:
-             print(f"[DEBUG] Shipping Header check failed. Scanned {scan_limit_col} columns.")
-
-        if found_col_idx is None:
-            return pd.DataFrame()
-            
-        # Extract Block (7 cols)
-        # Headers: Tanggal, Shift, AP LS, AP LS (MK3), AP SS, Total LS, Total SS
-        block_width = 7
-        df = df_raw.iloc[header_row_idx+1:, found_col_idx : found_col_idx+block_width].copy()
-        
-        # Rename Cols
-        cols = ['Date', 'Shift', 'AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
-        # Handle width mismatch
-        current_cols = df.shape[1]
-        df.columns = cols[:current_cols]
-        
-        # Clean Data
-        df = df.dropna(subset=['Date'])
-        # Ensure valid dates
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df.dropna(subset=['Date'])
-        
-        # Clean Shift
-        def clean_shift(val):
-            s = str(val).strip().lower()
-             # extract digit
-            import re
-            m = re.search(r'\d+', s)
-            return int(m.group()) if m else 1
-            
-        if 'Shift' in df.columns:
-            df['Shift'] = df['Shift'].apply(clean_shift)
-        else:
-            df['Shift'] = 1
-            
-        # FILTER EMPTY ROWS (Shipping)
-        # User Request: If only Date & Shift exist, but no tonnage data (empty or '-'), DROP it.
-        # AND if all data is 0, DROP it too ("hilangkan saja klo datanya masih 0 semua").
-        # Only keep if at least one column has actual value > 0.
-        def is_valid_shipping_row(row):
-            # Check tonnage cols
-            ton_cols = ['AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
-            has_data = False
-            for c in ton_cols:
-                if c not in row: continue
-                val = row[c]
-                
-                # Treat 0 and NaN as "No Data" (continue)
+                # Check data to confirm year 2026
+                # Look ahead a few rows to confirm it's a valid data block
+                is_valid_block = False
                 try:
-                    # Check NaN first
-                    if pd.isna(val): continue
-                    
-                    v_float = float(val)
-                    if pd.isna(v_float): continue # Result is NaN (e.g. float('nan'))
-                    
-                    if v_float != 0: 
-                        has_data = True; break
-                    else:
-                        continue # It is 0, so treat as empty
+                    for r_offset in range(1, 4): # Check first 3 data rows
+                        if header_row_idx + r_offset >= len(df_raw): break
+                        sample_val = str(df_raw.iloc[header_row_idx+r_offset, c])
+                        if '2026' in sample_val:
+                             is_valid_block = True
+                             break
                 except: pass
                 
-                s = str(val).strip()
-                if pd.notna(val) and s != '' and s != '-' and s != 'nan' and s != 'None':
-                    # Non-numeric text? If it failed float conversion but is text, maybe keep?
-                    # But usually these are numbers.
-                    # If it is "-", we treat as empty.
-                    has_data = True; break
-            return has_data
+                if is_valid_block:
+                     # Extract Block (7 cols)
+                     block_width = 7
+                     if c + block_width > scan_limit_col: continue
 
-        valid_mask = df.apply(is_valid_shipping_row, axis=1)
-        df = df[valid_mask]
-
-        # Clean Numerics
-        num_cols = ['AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
-        for c in num_cols:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-                
-        return df
+                     df = df_raw.iloc[header_row_idx+1:, c : c+block_width].copy()
+                     
+                     # Rename Cols
+                     cols = ['Date', 'Shift', 'AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
+                     current_cols = len(df.columns)
+                     df.columns = cols[:current_cols]
+                     
+                     # Clean Data
+                     df = df.dropna(subset=['Date'])
+                     
+                     # Clean Numerics
+                     num_cols = ['AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
+                     for col in num_cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                     
+                     # Drop if all numeric are 0 (Empty rows)
+                     # Only keep rows with at least some data
+                     # But be careful not to drop valid 0s if that's possible?
+                     # User said "hilangkan saja klo datanya masih 0 semua"
+                     mask = (df[num_cols].sum(axis=1) > 0)
+                     df = df[mask]
+                     
+                     if not df.empty:
+                        # Date Convert
+                        df['Date'] = safe_parse_date_column(df['Date'])
+                        df = df.dropna(subset=['Date'])
+                        
+                        # Shift Convert
+                        if 'Shift' in df.columns:
+                            def clean_shift(x):
+                                x = str(x).lower().replace('shift', '').strip()
+                                import re
+                                m = re.search(r'\d+', x)
+                                if m: return int(m.group())
+                                if x == 'i': return 1
+                                if x == 'ii': return 2
+                                if x == 'iii': return 3
+                                return 1
+                            df['Shift'] = df['Shift'].apply(clean_shift)
+                        
+                        found_dfs.append(df)
+        
+        if found_dfs:
+            final_df = pd.concat(found_dfs, ignore_index=True)
+            return final_df
+        else:
+            return pd.DataFrame()
 
     except Exception as e:
         print(f"Error parsing Shipping: {e}")
@@ -505,7 +515,11 @@ def parse_shipping_data(source):
 def parse_daily_plan_data(source):
     try:
         # Header is at Row 3 (Index 2)
-        df = pd.read_excel(source, sheet_name='Scheduling', header=2)
+        try:
+            df = pd.read_excel(source, sheet_name='Scheduling', header=2, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            df = pd.read_excel(source, sheet_name='Scheduling', header=2)
         if df.empty: return pd.DataFrame()
         
         if 'Tanggal' in df.columns:
@@ -534,7 +548,11 @@ def parse_daily_plan_data(source):
 # ============================================================
 def parse_target_data(source):
     try:
-        xls = pd.ExcelFile(source)
+        try:
+            xls = pd.ExcelFile(source, engine='openpyxl')
+        except:
+            if hasattr(source, 'seek'): source.seek(0)
+            xls = pd.ExcelFile(source)
         if 'Analisa Produksi' not in xls.sheet_names:
             return pd.DataFrame()
             

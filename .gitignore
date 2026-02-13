@@ -32,3 +32,8 @@ Thumbs.db
 Presentasi_Gamma.md
 ~$*.docx
 
+
+# Debug & Logs
+debug_*.py
+debug_*.txt
+*.log
