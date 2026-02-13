@@ -234,10 +234,27 @@ def show_shipping():
         cols_to_drop = ['Quantity'] if 'total_ls' in df.columns else []
         df_display = df.drop(columns=cols_to_drop, errors='ignore').rename(columns=rename_display)
         
+        # Explicitly select columns to ensure no technical columns (id, created_at, updated_at) slip through
+        desired_cols = ['Tanggal', 'Shift', 'AP LS', 'AP MK3', 'AP SS', 'Total LS', 'Total SS']
+        # Filter matching columns
+        final_cols = [c for c in desired_cols if c in df_display.columns]
+        df_display = df_display[final_cols]
+        
         # Display Sort: Descending (Newest First)
         # User REQ: "Data terbaru di paling atas"
         if 'Tanggal' in df_display.columns:
-             df_display = df_display.sort_values(by='Tanggal', ascending=False)
+             sort_cols = ['Tanggal']
+             asc_order = [False] # Date Descending (Newest First)
+             
+             if 'Shift' in df_display.columns:
+                 # Ensure Shift is numeric for proper sorting (1, 2, 3)
+                 try:
+                    df_display['Shift'] = pd.to_numeric(df_display['Shift'])
+                    sort_cols.append('Shift')
+                    asc_order.append(False) # Shift Descending (3, 2, 1) - User Request "Terakhir Input (Shift 3) Paling Atas"
+                 except: pass # If Shift is non-numeric string, standard sort might apply
+                 
+             df_display = df_display.sort_values(by=sort_cols, ascending=asc_order)
         
         st.dataframe(
             df_display, 

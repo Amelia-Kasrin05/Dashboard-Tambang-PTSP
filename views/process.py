@@ -46,6 +46,11 @@ def show_process():
         return
 
     # Debug: Check columns (New Schema)
+    # st.write("DEBUG Columns:", df_filtered.columns.tolist())
+    # st.write("DEBUG ID Present:", 'id' in df_filtered.columns)
+    # if 'id' in df_filtered.columns:
+    #      st.write("DEBUG Top 5 rows:", df_filtered[['Jam', 'Shift', 'id']].head(5))
+    
     required_cols = ['Ritase', 'Dumping', 'Unit', 'Jam']
     missing = [c for c in required_cols if c not in df_filtered.columns]
     if missing:
@@ -210,11 +215,18 @@ def show_process():
         # Prepare Display Dataframe
         df_display = df_filtered.copy()
         
-        # 1. Sort: Latest data first (Last Input First Output)
-        if 'Row_Order' in df_display.columns:
-            df_display = df_display.sort_values(by='Row_Order', ascending=False)
+        # 1. Sort: Latest data (Bottom of Excel) at Top of Dashboard = Shift 3 Top
+        # Empirical Data: Shift 1 (High ID), Shift 3 (Low ID) -> We need ID ASC to show Shift 3 at Top
+        if 'id' in df_display.columns:
+            df_display = df_display.sort_values(by='id', ascending=True) 
+        elif 'Row_Order' in df_display.columns:
+            df_display = df_display.sort_values(by='Row_Order', ascending=True)
         else:
-            df_display = df_display.sort_index(ascending=False)
+            # Fallback: Date Desc, Time Desc (Explicit)
+            if 'Tanggal' in df_display.columns and 'Jam' in df_display.columns:
+                # Custom sort for Time to handle 00:00 as 'End'
+                # But ID sort preferred
+                 df_display = df_display.sort_values(by=['Tanggal', 'Jam'], ascending=[False, False])
         
         # 2. Format Date
         df_display['Date'] = df_display['Tanggal'].astype(str)
@@ -241,8 +253,15 @@ def show_process():
         st.dataframe(df_display[cols_to_show], use_container_width=True, hide_index=True)
         
         # Excel Download (Sort Ascending = Oldest Data First)
-        # Note: df_display is Newest First. We reverse it for download.
-        df_download = df_display[cols_to_show].iloc[::-1]
+        # Empirical: Shift 1 (High ID) -> We need ID DESC to show Shift 1 at Top
+        df_download_source = df_display.copy()
+        if 'id' in df_download_source.columns:
+             df_download_source = df_download_source.sort_values(by='id', ascending=False)
+        else:
+             # Fallback reverse of dashboard
+             df_download_source = df_download_source.iloc[::-1]
+             
+        df_download = df_download_source[cols_to_show]
         
         from utils.helpers import convert_df_to_excel
         excel_data = convert_df_to_excel(df_download)

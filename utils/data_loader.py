@@ -1351,8 +1351,8 @@ def load_daily_plan_data():
         if 'Tanggal' in df.columns:
             df['Tanggal'] = pd.to_datetime(df['Tanggal'])
         
-        # Reorder columns: Hari first
-        cols = [c for c in ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan'] if c in df.columns]
+        # Reorder columns: Hari first - Include ID for sorting
+        cols = [c for c in ['id', 'Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay', 'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan'] if c in df.columns]
         df = df[cols]
         
         return df

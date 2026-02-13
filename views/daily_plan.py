@@ -653,7 +653,8 @@ def create_data_table(df_filtered):
         return pd.DataFrame()
     
     # Show ALL relevant columns from Excel (using exact Excel column names)
-    cols_to_show = ['Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay',
+    # Include 'id' for sorting (will be dropped after sort in show_daily_plan)
+    cols_to_show = ['id', 'Hari', 'Tanggal', 'Shift', 'Batu Kapur', 'Silika', 'Clay',
                     'Alat Muat', 'Alat Angkut', 'Blok', 'Grid', 'ROM', 'Keterangan']
     
     # Only include columns that exist in dataframe
@@ -737,11 +738,7 @@ def create_data_table(df_filtered):
     }
     display_df = display_df.rename(columns=header_map)
     
-    # Display Sort: Ascending (Oldest First / DB Order)
-    if 'Tanggal' in display_df.columns:
-        sort_cols = ['Tanggal']
-        if 'Shift' in display_df.columns: sort_cols.append('Shift')
-        display_df = display_df.sort_values(by=sort_cols, ascending=True)
+    # Sort is now handled in show_daily_plan() using ID column
     
     return display_df
 
@@ -1049,11 +1046,25 @@ def show_daily_plan():
     
     if not df_filtered.empty:
         display_df = create_data_table(df_filtered)
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+        
+        # 1. Dashboard Display (LIFO - Latest Input/ID 1 at Top)
+        if 'id' in display_df.columns:
+            df_view = display_df.sort_values(by='id', ascending=True)
+            df_download = display_df.sort_values(by='id', ascending=False)
+            
+            # Drop ID for display/download
+            df_view = df_view.drop(columns=['id'])
+            df_download = df_download.drop(columns=['id'])
+        else:
+            # Fallback
+            df_view = display_df
+            df_download = display_df
+            
+        st.dataframe(df_view, use_container_width=True, hide_index=True, height=400)
         
         # Excel Download
         from utils.helpers import convert_df_to_excel
-        excel_data = convert_df_to_excel(display_df)
+        excel_data = convert_df_to_excel(df_download)
         
         st.download_button(
             label="📥 Unduh Data Rencana (Excel)",

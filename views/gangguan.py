@@ -337,7 +337,7 @@ def show_gangguan():
             fig_trend.update_layout(**get_chart_layout(height=380, show_legend=False))
             fig_trend.update_layout(
                 xaxis_title="Tanggal",
-                yaxis_title="Total Jam Downtime",
+                yaxis_title="Total Jam-Unit Downtime",
                 margin=dict(t=20, b=0, l=0, r=0)
             )
             st.plotly_chart(fig_trend, use_container_width=True)
@@ -392,7 +392,28 @@ def show_gangguan():
         df_display = df_display[new_order]
 
         # 2b. Drop internal ID column and Helper Columns (User Request: Hide Bulan/Tahun/Week)
-        hide_cols = ['id', 'Bulan', 'Tahun', 'Week']
+        # BUT FIRST: SORTING using ID (Must be done before dropping ID)
+        
+        # Display Sort: ID Ascending (If IDs are inverted, Low ID = Latest Data)
+        # User Req: "Data input terakhir (Latest) di paling atas" -> Reverse current Descending to Ascending
+        if 'id' in df_display.columns:
+             df_display = df_display.sort_values(by='id', ascending=True)
+        else:
+             # Fallback
+             sort_cols_disp = []
+             asc_order_disp = []
+             if 'Tanggal' in df_display.columns: 
+                 sort_cols_disp.append('Tanggal')
+                 asc_order_disp.append(False)
+             if 'Start' in df_display.columns:
+                 sort_cols_disp.append('Start')
+                 asc_order_disp.append(False) # Newest time first
+             
+             if sort_cols_disp:
+                 df_display = df_display.sort_values(by=sort_cols_disp, ascending=asc_order_disp)
+
+        # Now drop the columns
+        hide_cols = ['id', 'Bulan', 'Tahun', 'Week', 'created_at', 'updated_at']
         for c in hide_cols:
             if c in df_display.columns:
                 df_display = df_display.drop(columns=[c])
@@ -408,52 +429,36 @@ def show_gangguan():
              df_display['Durasi'] = pd.to_numeric(df_display['Durasi'], errors='coerce')
              df_display['Durasi'] = df_display['Durasi'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
              
-        # 3. Drop columns after Link/Lampiran logic REMOVED to show Month/Year/Week columns
-        # if 'Link/Lampiran' in df_display.columns:
-        #      pass
-             
-        # Sort latest first if possible, or reverse (DISABLED as per user request to match DB order)
-        # df_display = df_display.iloc[::-1]
-        
-        # Display Sort: Descending (Newest First)
-        if 'Tanggal' in df_display.columns:
-             sort_cols_disp = ['Tanggal']
-             if 'Start' in df_display.columns: sort_cols_disp.append('Start')
-             df_display = df_display.sort_values(by=sort_cols_disp, ascending=False)
-        
-        # Final Format for Week column if exists (Database returns Int64, display as int)
-        if 'Week' in df_display.columns:
-             df_display['Week'] = df_display['Week'].astype(str)
-
+        # Display Table
         st.dataframe(df_display, use_container_width=True, hide_index=True)
         
-
+        # Excel Download (Sort Ascending = OLDEST FIRST = Original Excel Order)
+        # source must be df_gangguan (raw) or df_display (cleaned but missing ID)
+        # Use df_gangguan to get ID back
         
-        # Excel Download (Sort Descending = NEWEST FIRST)
-        # User Req: "Data paling bawah di tabel (terbaru) jadi paling atas di download"
-        # 1. Sort by DATE THEN Start Time
-        sort_cols = []
-        if 'Tanggal' in df_gangguan.columns: sort_cols.append('Tanggal')
-        if 'Start' in df_gangguan.columns: sort_cols.append('Start')
+        df_download = df_gangguan.copy()
         
-        # Ascending Sort
-        df_download = df_gangguan.sort_values(by=sort_cols, ascending=True) if sort_cols else df_gangguan
+        # 1. Sort by ID DESC (If IDs are inverted, High ID = Oldest Data)
+        if 'id' in df_download.columns:
+            df_download = df_download.sort_values(by='id', ascending=False)
+        else:
+             sort_cols = []
+             if 'Tanggal' in df_download.columns: sort_cols.append('Tanggal')
+             if 'Start' in df_download.columns: sort_cols.append('Start')
+             if sort_cols:
+                 df_download = df_download.sort_values(by=sort_cols, ascending=True)
         
-        # 2. Format Date to String (YYYY-MM-DD) to remove 00:00:00 timestamp
-        # 2. Format Date to String (YYYY-MM-DD) to remove 00:00:00 timestamp
+        # 2. Format Date to String (YYYY-MM-DD)
         if 'Tanggal' in df_download.columns:
-            # First ensure it's datetime just in case (though it should be from global filters)
             try:
                 df_download['Tanggal'] = pd.to_datetime(df_download['Tanggal']).dt.strftime('%Y-%m-%d')
-            except:
-                pass # If it fails (already string or strange format), leave it
-                
+            except: pass
+            
         if 'Week' in df_download.columns:
              df_download['Week'] = df_download['Week'].fillna(0).astype(int).astype(str)
 
-        # 3. Drop unwanted columns (Extra, Bulan_Name, id, and User requested to hide Bulan/Tahun/Week)
-        # Explicit drop is safer than index truncation
-        unwanted_cols = ['Extra', 'Bulan_Name', 'Month', 'Month_Name', 'id', 'Bulan', 'Tahun', 'Week']
+        # 3. Drop unwanted columns (Technical + User Hids)
+        unwanted_cols = ['Extra', 'Bulan_Name', 'Month', 'Month_Name', 'id', 'created_at', 'updated_at', 'Bulan', 'Tahun', 'Week']
         df_download = df_download.drop(columns=unwanted_cols, errors='ignore')
         
         from utils.helpers import convert_df_to_excel

@@ -373,8 +373,18 @@ def show_ritase():
         display_df = apply_global_filters(df_prod_raw).copy()
         
         # Format Date to String (YYYY-MM-DD)
+        # Format Date to String (YYYY-MM-DD)
         if 'Date' in display_df.columns:
             display_df['Date'] = display_df['Date'].astype(str)
+            
+        # 1. SORTING (Must be done BEFORE column selection to use 'id')
+        # Display Sort: ID Ascending (Shift 3/Low ID at Top = Reverse Excel/LIFO)
+        if 'id' in display_df.columns:
+             display_df = display_df.sort_values(by='id', ascending=True)
+        else:
+             # Fallback
+             if 'Date' in display_df.columns and 'Time' in display_df.columns:
+                 display_df = display_df.sort_values(by=['Date', 'Time'], ascending=[False, True])
             
         # Select relevant columns for Ritase view
         # Select relevant columns for Ritase view (MATCHING PRODUKSI)
@@ -384,27 +394,33 @@ def show_ritase():
         # Filter existing columns
         show_cols = [c for c in cols if c in display_df.columns]
         
-        # Filter existing columns
-        show_cols = [c for c in cols if c in display_df.columns]
-        
-        # Display Sort: Descending (Newest data first - matches DB insert order)
-        if 'Date' in display_df.columns and 'Time' in display_df.columns:
-             display_df = display_df.sort_values(by=['Date', 'Time'], ascending=False)
-        elif 'Date' in display_df.columns:
-             display_df = display_df.sort_values(by=['Date'], ascending=False)
-        
         st.dataframe(display_df[show_cols], use_container_width=True)
         
         # Excel Download (Sort Ascending = OLDEST FIRST for chronological order)
-        df_download = display_df[show_cols].copy()
+        # Using ID Descending (Shift 1 Top / Original Excel)
         
-        if 'Date' in df_download.columns and 'Time' in df_download.columns:
+        # Prepare valid download source (Raw filtered)
+        df_download = apply_global_filters(df_prod_raw).copy()
+        
+        if 'id' in df_download.columns:
+             df_download = df_download.sort_values(by='id', ascending=False)
+        elif 'Date' in df_download.columns and 'Time' in df_download.columns:
              df_download = df_download.sort_values(by=['Date', 'Time'], ascending=True)
         elif 'Date' in df_download.columns:
              df_download = df_download.sort_values(by=['Date'], ascending=True)
+             
+        # Format Date
+        if 'Date' in df_download.columns:
+             if pd.api.types.is_datetime64_any_dtype(df_download['Date']):
+                 df_download['Date'] = df_download['Date'].dt.strftime('%Y-%m-%d')
+             else:
+                 df_download['Date'] = df_download['Date'].astype(str)
+
+        # FINAL DISPATCH: Filter only relevant columns (Exclude ID)
+        df_download_final = df_download[[c for c in cols if c in df_download.columns]]
 
         from utils.helpers import convert_df_to_excel
-        excel_data = convert_df_to_excel(df_download)
+        excel_data = convert_df_to_excel(df_download_final)
         
         st.download_button(
             label="📥 Unduh Data Ritase (Excel)",

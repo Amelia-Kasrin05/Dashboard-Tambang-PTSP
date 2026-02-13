@@ -55,8 +55,8 @@ def parse_production_data(source):
             
         for sheet in target_sheets:
             try:
-                # Header Scanning
-                df_raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=100)
+                # Header Scanning - Reading Full Sheet (Match Stockpile Logic)
+                df_raw = pd.read_excel(xls, sheet_name=sheet, header=None)
                 header_idx = 0
                 for i in range(len(df_raw)):
                     row_str = df_raw.iloc[i].astype(str).str.cat(sep=' ').lower()
@@ -97,6 +97,33 @@ def parse_production_data(source):
                 # Fill missing columns
                 for req in ['Excavator', 'Front', 'Commodity', 'Dump Truck', 'Dump Loc', 'BLOK', 'Time', 'Shift']:
                     if req not in temp_df.columns: temp_df[req] = None
+
+                # FILTER EMPTY ROWS (User Request)
+                # Remove rows where Date is present but other keys are empty or '-'
+                # Critical columns: Time, Shift, Excavator, Dump Truck
+                def is_valid_row(row):
+                    # Check if at least one critical column has real data (not None, NaN, or '-')
+                    # Broadened check to include ALL data columns so we don't accidentally drop sparse rows
+                    # EXCLUDE SHIFT: Shift alone is not enough to keep a row (User Bug Report)
+                    criticals = [
+                        row['Time'], row['Excavator'], row['Dump Truck'], 
+                        row['Front'], row['Commodity'], row['Dump Loc'], row['BLOK'],
+                        row.get('Rit', 0), row.get('Tonnase', 0)
+                    ]
+                    for val in criticals:
+                        s = str(val).strip()
+                        # Allow 0 for Rit/Tonase if explicitly valid? No, usually 0 means empty in this excel
+                        if pd.notna(val) and s != '' and s != '-' and s != 'nan' and s != 'None':
+                            # Special check for numerics 0
+                            try:
+                                if float(val) == 0: continue 
+                            except: pass
+                            
+                            return True # Found something valid
+                    return False
+
+                valid_mask = temp_df.apply(is_valid_row, axis=1)
+                temp_df = temp_df[valid_mask]
                     
                 # Numerics
                 for n in ['Rit', 'Tonnase']:
@@ -205,51 +232,80 @@ def parse_stockpile_hopper(source):
         # looking for: Date, Time, Shift, Dumping, Unit, Ritase
         header_idx = None
         
-        # We need to scan enough rows. Debug showed it at 3399.
-        # Let's verify we have enough data.
-        scan_limit = len(df_raw)
-        print(f"Scanning {scan_limit} rows for Stockpile header...")
+        # Header Scanning: User confirmed header is at Row 3399 for 2026 data
+        # We must scan the FULL sheet again.
+        header_idx = None
+        df_raw = pd.read_excel(xls, sheet_name='Stockpile Hopper', header=None)
         
-        for i in range(scan_limit):
-             # Row string conversion for matching
-             # Columns 0, 1, 2, 3...
-             # Row 3399: Date, Time, Shift, Dumping...
-             
-             # Optimization: Check specific columns first
-             c0 = str(df_raw.iloc[i, 0]).strip().lower()
-             c3 = str(df_raw.iloc[i, 3]).strip().lower()
-             
-             if 'date' == c0 and 'dumping' == c3:
-                 header_idx = i
-                 print(f"Found Stockpile 2026 Header at row {i}")
-                 break
+        # Optimization: Start scanning from row 3000 to save time and avoid old headers (2025 data)
+        # User confirmed 2026 data starts at 3399.
+        start_scan = 3000 if len(df_raw) > 3000 else 0
         
-        if header_idx is None: 
-            print("Stockpile Header not found in scan.")
-            return pd.DataFrame()
+        for i in range(start_scan, len(df_raw)):
+            row_str = df_raw.iloc[i].astype(str).str.cat(sep=' ').lower()
+            # Strict check again because we know where it is roughly
+            # Row 3399: Date, Time, Shift, Dumping, Unit, Rit
+            if 'date' in row_str and 'dumping' in row_str and 'unit' in row_str:
+                header_idx = i
+                print(f"Found Stockpile Header at row {i}")
+                break
+        
+        if header_idx is None:
+            print("Stockpile Header not found.")
+            return pd.DataFrame() 
 
         df = pd.read_excel(xls, sheet_name='Stockpile Hopper', header=header_idx)
         
         # Standardize Columns
-        # Excel: Date, Time, Shift, Dumping, Unit, Ritase
+        # Excel: Date/Tanggal, Time/Jam, Shift, Dumping, Unit, Ritase
         rename_dict = {}
         for col in df.columns:
             lower_col = str(col).lower().strip()
-            if 'date' == lower_col: rename_dict[col] = 'Tanggal'
-            elif 'time' == lower_col: rename_dict[col] = 'Jam'
+            if 'date' == lower_col or 'tanggal' == lower_col: rename_dict[col] = 'Tanggal'
+            elif 'time' == lower_col or 'jam' == lower_col: rename_dict[col] = 'Jam'
             elif 'shift' == lower_col: rename_dict[col] = 'Shift'
-            elif 'dumping' == lower_col: rename_dict[col] = 'Loader'
+            elif 'dumping' == lower_col or 'loader' == lower_col: rename_dict[col] = 'Loader'
             elif 'unit' == lower_col: rename_dict[col] = 'Unit'
             elif 'ritase' == lower_col: rename_dict[col] = 'Ritase'
+            elif 'total' == lower_col: rename_dict[col] = 'Ritase' 
+            elif 'rit' == lower_col: rename_dict[col] = 'Ritase' # Added 'Rit'
 
         df = df.rename(columns=rename_dict)
         
-        if 'Tanggal' not in df.columns: return pd.DataFrame()
+        if 'Tanggal' not in df.columns: 
+            return pd.DataFrame()
 
         # Parse Date
         df['Tanggal'] = safe_parse_date_column(df['Tanggal'])
         df = df.dropna(subset=['Tanggal'])
         
+        # FILTER EMPTY ROWS (Stockpile) - MOVED UP
+        # Remove rows where Date is present but other keys are empty or '-'
+        # Critical columns: Loader, Unit, Ritase, Jam, Shift
+        def is_valid_stockpile_row(row):
+            # Check Ritase
+            rit = row['Ritase'] if 'Ritase' in row else 0
+            try:
+                if float(rit) > 0: return True
+            except: pass
+            
+            # Check Text Cols
+            # Use safe get
+            loader = row.get('Loader', '')
+            unit = row.get('Unit', '')
+            jam = row.get('Jam', '')
+            # EXCLUDE SHIFT: Shift alone is not enough (User Bug Report)
+            
+            criticals = [loader, unit, jam]
+            for val in criticals:
+                s = str(val).strip().lower()
+                if pd.notna(val) and s != '' and s != '-' and s != 'nan' and s != 'unknown' and s != 'none':
+                    return True
+            return False
+
+        valid_mask = df.apply(is_valid_stockpile_row, axis=1)
+        df = df[valid_mask]
+
         if 'Jam' in df.columns:
             # Just clean whitespace, keep text
             df['Jam'] = df['Jam'].astype(str).str.strip()
@@ -280,6 +336,33 @@ def parse_stockpile_hopper(source):
         if 'Loader' not in df.columns: df['Loader'] = 'Unknown'
         if 'Unit' not in df.columns: df['Unit'] = 'Unknown'
         
+        # FILTER EMPTY ROWS (Stockpile)
+        # Remove rows where Date is present but other keys are empty or '-'
+        # Critical columns: Loader, Unit, Ritase, Jam, Shift
+        def is_valid_stockpile_row(row):
+            # Check if at least one critical column has real data
+            # Ritase must be > 0 or Loader/Unit/Jam/Shift must be valid text
+            
+            # Check Ritase
+            rit = row['Ritase'] if 'Ritase' in row else 0
+            try:
+                if float(rit) > 0: return True
+            except: pass
+            
+            # Check Text Cols
+            # Broader check: include Jam and Shift
+            criticals = [row['Loader'], row['Unit'], row['Jam'], row['Shift']]
+            for val in criticals:
+                s = str(val).strip().lower()
+                # 0 is considered "data" for Shift (e.g. Shift 0?) unlikely but safe.
+                # But 'unknown' is default filler, so ignore that.
+                if pd.notna(val) and s != '' and s != '-' and s != 'nan' and s != 'unknown':
+                    return True
+            return False
+
+        valid_mask = df.apply(is_valid_stockpile_row, axis=1)
+        df = df[valid_mask]
+
         return df[['Tanggal', 'Jam', 'Shift', 'Loader', 'Unit', 'Ritase']]
     except: return pd.DataFrame()
 
@@ -367,6 +450,43 @@ def parse_shipping_data(source):
         else:
             df['Shift'] = 1
             
+        # FILTER EMPTY ROWS (Shipping)
+        # User Request: If only Date & Shift exist, but no tonnage data (empty or '-'), DROP it.
+        # AND if all data is 0, DROP it too ("hilangkan saja klo datanya masih 0 semua").
+        # Only keep if at least one column has actual value > 0.
+        def is_valid_shipping_row(row):
+            # Check tonnage cols
+            ton_cols = ['AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
+            has_data = False
+            for c in ton_cols:
+                if c not in row: continue
+                val = row[c]
+                
+                # Treat 0 and NaN as "No Data" (continue)
+                try:
+                    # Check NaN first
+                    if pd.isna(val): continue
+                    
+                    v_float = float(val)
+                    if pd.isna(v_float): continue # Result is NaN (e.g. float('nan'))
+                    
+                    if v_float != 0: 
+                        has_data = True; break
+                    else:
+                        continue # It is 0, so treat as empty
+                except: pass
+                
+                s = str(val).strip()
+                if pd.notna(val) and s != '' and s != '-' and s != 'nan' and s != 'None':
+                    # Non-numeric text? If it failed float conversion but is text, maybe keep?
+                    # But usually these are numbers.
+                    # If it is "-", we treat as empty.
+                    has_data = True; break
+            return has_data
+
+        valid_mask = df.apply(is_valid_shipping_row, axis=1)
+        df = df[valid_mask]
+
         # Clean Numerics
         num_cols = ['AP_LS', 'AP_LS_MK3', 'AP_SS', 'Total_LS', 'Total_SS']
         for c in num_cols:

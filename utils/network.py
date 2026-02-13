@@ -32,7 +32,7 @@ def convert_onedrive_link(share_link, cache_bust=False):
     except Exception:
         return None
 
-def download_from_onedrive(share_link, timeout=60, cache_bust=False):
+def download_from_onedrive(share_link, timeout=60, cache_bust=True):
     """Download file from OneDrive"""
     direct_url = convert_onedrive_link(share_link, cache_bust=cache_bust)
     

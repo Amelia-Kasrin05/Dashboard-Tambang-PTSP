@@ -347,30 +347,42 @@ def show_produksi():
              # Fix AttributeError: Can only use .dt accessor with datetimelike values
              # Since DB returns datetime.date objects, use astype(str)
              df_display['Date'] = df_display['Date'].astype(str)
+        
+        # 1. SORTING (Must be done BEFORE column selection to use 'id')
+        # Display Sort: ID Ascending (Shift 3/Low ID at Top = Reverse Excel/LIFO)
+        if 'id' in df_display.columns:
+             df_display = df_display.sort_values(by='id', ascending=True)
+        else:
+             # Fallback
+             if 'Date' in df_display.columns and 'Time' in df_display.columns:
+                 df_display = df_display.sort_values(by=['Date', 'Time'], ascending=[False, True])
              
         display_cols = ['Date', 'Time', 'Shift', 'BLOK', 'Front', 'Commodity', 
                         'Excavator', 'Dump Truck', 'Dump Loc', 'Rit', 'Tonnase']
         df_display = df_display[[c for c in display_cols if c in df_display.columns]]
-        
-        # Display Sort: Descending (Newest First - matches DB insert order)
-        if 'Date' in df_display.columns and 'Time' in df_display.columns:
-            df_display = df_display.sort_values(by=['Date', 'Time'], ascending=False)
              
         st.dataframe(df_display, use_container_width=True)
         
-        # Excel Download (Sort Ascending = OLDEST FIRST for chronological order)
-        # User Req: Data paling lama di paling atas saat download
+        # Excel Download (Sort Descending ID = Shift 1/High ID at Top = Original Excel/FIFO)
+        # User Req: Data paling lama (Shift 1) di paling atas saat download
         
         # 1. Sort raw data first
         df_sorted = apply_global_filters(df_prod_raw)
-        if 'Date' in df_sorted.columns and 'Time' in df_sorted.columns:
+        
+        if 'id' in df_sorted.columns:
+             df_sorted = df_sorted.sort_values(by='id', ascending=False)
+        elif 'Date' in df_sorted.columns and 'Time' in df_sorted.columns:
              df_sorted = df_sorted.sort_values(by=['Date', 'Time'], ascending=True)
         elif 'Date' in df_sorted.columns:
              df_sorted = df_sorted.sort_values(by='Date', ascending=True)
         
         # 2. Format Date to match table string format
         if 'Date' in df_sorted.columns:
-             df_sorted['Date'] = df_sorted['Date'].dt.strftime('%Y-%m-%d')
+             # Check if dt accessor available
+             if pd.api.types.is_datetime64_any_dtype(df_sorted['Date']):
+                 df_sorted['Date'] = df_sorted['Date'].dt.strftime('%Y-%m-%d')
+             else:
+                 df_sorted['Date'] = df_sorted['Date'].astype(str)
              
         # 3. Select ONLY the columns shown in table
         df_download = df_sorted[[c for c in display_cols if c in df_sorted.columns]]

@@ -30,9 +30,9 @@ GANGGUAN_FILE = os.getenv("GANGGUAN_FILE", GANGGUAN_EXCEL_PATH)
 # Format: "https://1drv.ms/x/s!Am..."
 # NOTE: Ensure the link permission is set to "Anyone with the link" (Public)
 ONEDRIVE_LINKS = {
-    "produksi": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDvrAVlr7kFSrpX8-QHXuOnAd7QThWBm_Q2N5J7gzjuLSk?e=s0KJKk",        # Produksi
-    "gangguan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQC0vxKHmHKqQb1xtVoNmbVbAbVkNIf6HNZ3NHs6Ja0w0Wc?e=PmQT07",        # Gangguan
-    "monitoring": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCjeUwfc43DRJf4GO-ZcP42ASvhhEDn2xJj6HfDtE7ezlc?e=pqHs9l",      # Monitoring
+    "produksi": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCKVHMdKd3-SbrehhcDPlLXAW5OOPdj_jXyI5Jfz0mL_ug?e=DF6Nad",        # Produksi
+    "gangguan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQDm97Q8PL-oTan08MhPZBhvAdcx3m0KcBIKGvMdy222wmY?e=iMWPcv",        # Gangguan
+    "monitoring": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQB0qitoMm2dT6e7SBjuvOSpAXnW00ouEsVup94z5BXV6Gg?e=AOrRIB",      # Monitoring
     "daily_plan": "https://1drv.ms/x/c/07c1e1a8c3295b87/IQCdHgs2Q48oS6df5eUtFl2VAQXoPUVPMPSKVraYYeJF4d4?e=gtrFsF",      # Daily Plan
     "shipping": "",   # Paste Link for Shipping.xlsx
     "stockpile": ""   # Paste Link for Stockpile.xlsx
