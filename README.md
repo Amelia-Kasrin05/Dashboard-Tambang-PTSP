@@ -1,6 +1,6 @@
 # Dashboard Tambang PTSP
 
-Mining Operations Dashboard untuk PT Semen Padang.
+Mining Operations Dashboard PT Semen Padang.
 
 ## 📁 Struktur Proyek
 
