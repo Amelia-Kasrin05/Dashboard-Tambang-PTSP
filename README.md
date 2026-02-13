@@ -1,38 +1,30 @@
 # Dashboard Tambang PTSP
 
-Mining Operations Dashboard untuk PT Semen Padang.
+Mining Operations Dashboard PT Semen Padang.
 
 ## 📁 Struktur Proyek
 
 ```
 Dashboard-Tambang-PTSP/
-├── app.py                  # Entry point (minimal)
+├── app.py                  # Entry point
 ├── config/
-│   ├── __init__.py
-│   ├── settings.py         # User & theme config
-│   └── onedrive.py         # OneDrive & file paths
-├── utils/
-│   ├── __init__.py
-│   ├── data_loader.py      # Data loading functions
-│   └── helpers.py          # Utility functions
-├── components/
-│   ├── __init__.py
-│   ├── styles.py           # CSS styling
-│   ├── login.py            # Login page & auth
-│   └── sidebar.py          # Sidebar navigation
-├── pages/
-│   ├── __init__.py
-│   ├── dashboard.py        # Main dashboard
-│   ├── produksi.py         # Production page
-│   ├── gangguan.py         # Incident page
-│   ├── monitoring.py       # Monitoring page
-│   └── daily_plan.py       # Daily plan page
-├── assets/
-│   └── logo_semen_padang.jpg
-├── data/                   # Local data folder
-├── requirements.txt
-├── .gitignore
-└── README.md
+│   ├── settings.py         # Configuration & Constants
+│   └── onedrive.py         # OneDrive Integration
+├── views/                  # Dashboard Pages
+│   ├── dashboard.py        # Executive Summary
+│   ├── produksi.py         # Production Analysis
+│   ├── gangguan.py         # Downtime Analysis
+│   ├── ritase.py           # Ritase/Trip Analysis
+│   ├── shipping.py         # Shipping Analysis
+│   └── daily_plan.py       # Daily Plan Monitor
+├── components/             # UI Components
+│   ├── login.py            # Authentication
+│   └── sidebar.py          # Navigation Sidebar
+├── utils/                  # Helper Functions
+│   ├── data_loader.py      # Excel Processing
+│   └── db_manager.py       # Database Operations
+├── assets/                 # Static Assets
+└── requirements.txt
 ```
 
 ## 🚀 Cara Menjalankan
@@ -50,7 +42,7 @@ streamlit run app.py
 ## 🔐 Demo Login
 
 - **Username:** `admin_produksi`
-- **Password:** `prod123`
+- **Password:** `admin` (atau `prod123` jika belum direset)
 
 ## 📊 Fitur
 
