@@ -291,6 +291,91 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
                 return True
         return False
 
+    # Helper: Check if a line segment from (x1,y1) to (x2,y2) intersects a box
+    def line_intersects_box(x1, y1, x2, y2, bx, by, bw, bh, pad=10):
+        """Check if line segment crosses through a placed box (with padding)."""
+        # Box boundaries with padding
+        left = bx - bw/2 - pad
+        right = bx + bw/2 + pad
+        top = by + bh/2 + pad
+        bottom = by - bh/2 - pad
+        
+        # Quick reject: both endpoints on same side of box
+        if max(x1, x2) < left or min(x1, x2) > right: return False
+        if max(y1, y2) < bottom or min(y1, y2) > top: return False
+        
+        # Check if line segment intersects any of the 4 box edges
+        # Using parametric line intersection
+        dx = x2 - x1
+        dy = y2 - y1
+        
+        # Check intersections with vertical edges (left, right)
+        for edge_x in [left, right]:
+            if abs(dx) > 0.001:
+                t = (edge_x - x1) / dx
+                if 0 <= t <= 1:
+                    iy = y1 + t * dy
+                    if bottom <= iy <= top:
+                        return True
+        
+        # Check intersections with horizontal edges (top, bottom)
+        for edge_y in [bottom, top]:
+            if abs(dy) > 0.001:
+                t = (edge_y - y1) / dy
+                if 0 <= t <= 1:
+                    ix = x1 + t * dx
+                    if left <= ix <= right:
+                        return True
+        
+        return False
+
+    # Helper: Check if the L-shaped manifold path crosses any placed box
+    def trunk_crosses_boxes(tx, ty, cx, cy, boxes, placed_trunks):
+        """
+        Check if the L-shaped leader line path from target dot to label box
+        crosses other boxes. The actual path is:
+          1. Horizontal trunk: (tx, ty) -> (cx, ty)  [or bus_x approximation]
+          2. Vertical segment: (cx, ty) -> (cx, cy)
+        Also checks if existing trunks from already-placed labels would cross
+        through this new candidate box position.
+        """
+        visual_bw = 110  # must match visual_box_w used in rendering
+        bus_off = 20
+        
+        # Approximate the bus_x position for the candidate
+        if cx > tx:  # Box is Right of Target
+            approx_bus_x = cx - visual_bw/2 - bus_off
+        else:  # Box is Left of Target
+            approx_bus_x = cx + visual_bw/2 + bus_off
+        
+        # Segment 1: Horizontal trunk from target to bus_x
+        # Segment 2: Vertical from bus_x at target's Y to box's Y
+        for b in boxes:
+            # Check horizontal trunk segment against each placed box
+            if line_intersects_box(tx, ty, approx_bus_x, ty, b['x'], b['y'], b['w'], b['h'], pad=12):
+                return True
+            # Check vertical segment against each placed box
+            if line_intersects_box(approx_bus_x, ty, approx_bus_x, cy, b['x'], b['y'], b['w'], b['h'], pad=12):
+                return True
+        
+        # Also check: would existing placed trunks cross through this NEW candidate box?
+        cand_w = BOX_W
+        cand_h = BOX_H
+        for trunk in placed_trunks:
+            # Check existing horizontal trunk against candidate box
+            if line_intersects_box(trunk['tx'], trunk['ty'], trunk['bus_x'], trunk['ty'],
+                                   cx, cy, cand_w, cand_h, pad=12):
+                return True
+            # Check existing vertical segment against candidate box
+            if line_intersects_box(trunk['bus_x'], trunk['ty'], trunk['bus_x'], trunk['cy'],
+                                   cx, cy, cand_w, cand_h, pad=12):
+                return True
+        
+        return False
+    
+    # Track placed trunk lines for bi-directional collision checks
+    placed_trunks = []
+
     # GROUPING BY TARGET LOCATION (Aligned Stacking)
     # ----------------------------------------------
     grouped_annotations = {}
@@ -344,6 +429,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         if loc_id == 'D6': full_angles = [0, 30, 330]    # D6 Right 
         if loc_id == 'K3': full_angles = [180, 150, 210] # K3 Left 
         if loc_id == 'M10': full_angles = [0, 30, 330]   # M10 Right (Requested)
+        if loc_id == 'F5': full_angles = [0, 30, 330, 60, 300] # F5 Right (avoid left side congestion)
+        if loc_id == 'J5': full_angles = [0, 30, 330, 60, 300] # J5 Right (avoid crossing K3 on left)
         
         best_x, best_y = t_x, t_y
         found = False
@@ -379,6 +466,11 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
                             collision = True
                             break
                 
+                # Also check if L-shaped trunk line would cross through any placed box
+                if not collision:
+                    if trunk_crosses_boxes(t_x, t_y, c_x, c_y, placed_boxes, placed_trunks):
+                        collision = True
+                
                 if not collision:
                     best_x, best_y = c_x, c_y
                     found = True
@@ -413,6 +505,15 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
 
         # Register MEGA BOX to collision list
         placed_boxes.append({'x': best_x, 'y': best_y, 'w': BOX_W, 'h': total_h})
+        
+        # Record trunk geometry for future bi-directional collision checks
+        visual_bw = 110
+        bus_off = 20
+        if best_x > t_x:
+            rec_bus_x = best_x - visual_bw/2 - bus_off
+        else:
+            rec_bus_x = best_x + visual_bw/2 + bus_off
+        placed_trunks.append({'tx': t_x, 'ty': t_y, 'bus_x': rec_bus_x, 'cy': best_y})
         
         # UNPACK Individual Boxes
         start_y = best_y + (total_h / 2) - (BOX_H / 2)
