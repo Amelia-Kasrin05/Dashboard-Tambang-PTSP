@@ -80,28 +80,24 @@ def show_gangguan():
     total_incidents = len(df_gangguan)
     
     # PROFESSIONAL PA CALCULATION
-    # Base: Total Active Fleet (from Production) * 24 Hours * Days
-    # If using breakdown list only, we ignore healthy units -> PA is underestimated
+    # Fleet: Use units from gangguan data (units that are tracked for breakdowns)
+    # This avoids mixing Excavator names with Dump Truck configuration numbers from production data
+    fleet_size = df_gangguan['Alat'].nunique()
     
-    # Get Fleet Size from Production Data (Excavators + DTs)
-    active_units_list = set()
-    if not df_prod.empty:
-        if 'Excavator' in df_prod.columns:
-            active_units_list.update(df_prod['Excavator'].unique())
-        if 'Dump Truck' in df_prod.columns:
-            active_units_list.update(df_prod['Dump Truck'].unique())
-            
-    fleet_size = len(active_units_list)
-    
-    # Fallback if production data is missing but we have breakdown data
+    # Fallback if no unit data
     if fleet_size == 0:
-        fleet_size = df_gangguan['Alat'].nunique()
+        fleet_size = 1
         
-    # Calculate Calendar Time
-    if 'Tanggal' in df_gangguan.columns and not df_gangguan.empty:
+    # Calculate Calendar Days from Global Filter (consistent with filter range)
+    filters = st.session_state.get('global_filters', {})
+    date_range = filters.get('date_range')
+    if date_range and len(date_range) == 2:
+        days = (date_range[1] - date_range[0]).days + 1
+    elif 'Tanggal' in df_gangguan.columns and not df_gangguan.empty:
         days = (df_gangguan['Tanggal'].max() - df_gangguan['Tanggal'].min()).days + 1
     else:
         days = 1
+    if days < 1: days = 1
         
     scheduled_hours = fleet_size * 24 * days
     

@@ -81,7 +81,15 @@ def show_produksi():
     achievement_pct = (total_prod / target_period * 100) if target_period > 0 else 0
     
     # Productivity Logic
-    total_machine_hours = len(df_prod[df_prod['Tonnase'] > 0]) # Approximation
+    # FIXED: Count unique (Date + Excavator + Time) to avoid double counting split rows (e.g. different Dump Locs)
+    if not df_prod.empty and 'Excavator' in df_prod.columns and 'Time' in df_prod.columns:
+        # Filter active rows
+        active_df = df_prod[df_prod['Tonnase'] > 0].copy()
+        # Count unique time slots per unit
+        total_machine_hours = len(active_df.drop_duplicates(subset=['Date', 'Excavator', 'Time']))
+    else:
+         total_machine_hours = len(df_prod[df_prod['Tonnase'] > 0]) # Fallback
+
     avg_speed = (total_prod / total_machine_hours) if total_machine_hours > 0 else 0
     
     # Determine Status
@@ -317,22 +325,82 @@ def show_produksi():
                 fig_front.update_layout(yaxis=dict(autorange="reversed", automargin=True), showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_front, use_container_width=True)
     
-    # ROW 4: Disposal Analysis
-    with st.container(border=True):
-        st.markdown("##### 🚛 **DISTRIBUSI LOKASI BUANG (DISPOSAL)**")
-        st.markdown("*Sumber: Total Tonnase per Dump Location*")
-        st.markdown("---")
-        
-        if 'Dump Loc' in df_prod.columns and not df_prod.empty:
-            dump_prod = df_prod.groupby('Dump Loc')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+    # ROW 4: Produktivitas Per Unit & Disposal Analysis (Side by Side)
+    col_prod, col_dump = st.columns(2)
+    
+    with col_prod:
+        with st.container(border=True):
+            st.markdown("##### ⚡ **PRODUKTIVITAS PER UNIT (Ton/Jam)**")
+            st.markdown("*Kecepatan galian per unit*")
+            st.markdown("---")
             
-            # Solid Green Bars
-            fig_dump = px.bar(dump_prod, x='Tonnase', y='Dump Loc', orientation='h',
-                              text_auto='.2s',
-                              color_discrete_sequence=['#10b981'])                          
-            fig_dump.update_layout(**get_chart_layout(height=380))
-            fig_dump.update_layout(yaxis=dict(automargin=True), showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
-            st.plotly_chart(fig_dump, use_container_width=True)
+            if not df_prod.empty and 'Excavator' in df_prod.columns and 'Time' in df_prod.columns:
+                active_df = df_prod[df_prod['Tonnase'] > 0].copy()
+                
+                if not active_df.empty:
+                    unit_productivity = []
+                    for unit in active_df['Excavator'].unique():
+                        unit_data = active_df[active_df['Excavator'] == unit]
+                        unit_unique_hours = len(unit_data.drop_duplicates(subset=['Date', 'Excavator', 'Time']))
+                        unit_tonnase = unit_data['Tonnase'].sum()
+                        unit_speed = unit_tonnase / unit_unique_hours if unit_unique_hours > 0 else 0
+                        unit_productivity.append({
+                            'Excavator': unit,
+                            'Produktivitas': round(unit_speed, 1)
+                        })
+                    
+                    df_unit_prod = pd.DataFrame(unit_productivity).sort_values('Produktivitas', ascending=True)
+                    
+                    fig_prod = px.bar(
+                        df_unit_prod, 
+                        y='Excavator', 
+                        x='Produktivitas', 
+                        orientation='h',
+                        text=df_unit_prod['Produktivitas'].apply(lambda x: f"{x:,.0f} T/Jam"),
+                        color='Produktivitas',
+                        color_continuous_scale=['#ef4444', '#f59e0b', '#10b981'],
+                        labels={'Produktivitas': 'Ton/Jam', 'Excavator': ''}
+                    )
+                    
+                    # Average line
+                    fig_prod.add_vline(
+                        x=avg_speed, 
+                        line_dash="dash", 
+                        line_color="#d4a84b",
+                        annotation_text=f"Avg: {avg_speed:,.0f}",
+                        annotation_position="top",
+                        annotation_font_color="#d4a84b"
+                    )
+                    
+                    fig_prod.update_layout(**get_chart_layout(height=380))
+                    fig_prod.update_layout(
+                        showlegend=False, 
+                        coloraxis_showscale=False,
+                        margin=dict(t=30, b=0, l=0, r=0)
+                    )
+                    fig_prod.update_traces(textposition='inside', textfont_size=12)
+                    st.plotly_chart(fig_prod, use_container_width=True)
+                else:
+                    st.info("Tidak ada data produksi aktif.")
+            else:
+                st.warning("Data tidak tersedia.")
+    
+    with col_dump:
+        with st.container(border=True):
+            st.markdown("##### 🚛 **DISTRIBUSI LOKASI BUANG (DISPOSAL)**")
+            st.markdown("*Sumber: Total Tonnase per Dump Location*")
+            st.markdown("---")
+            
+            if 'Dump Loc' in df_prod.columns and not df_prod.empty:
+                dump_prod = df_prod.groupby('Dump Loc')['Tonnase'].sum().reset_index().sort_values('Tonnase', ascending=True)
+                
+                # Solid Green Bars
+                fig_dump = px.bar(dump_prod, x='Tonnase', y='Dump Loc', orientation='h',
+                                  text_auto='.2s',
+                                  color_discrete_sequence=['#10b981'])                          
+                fig_dump.update_layout(**get_chart_layout(height=380))
+                fig_dump.update_layout(yaxis=dict(automargin=True), showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
+                st.plotly_chart(fig_dump, use_container_width=True)
 
     # 5. DETAIL DATA & DOWNLOAD
     # ----------------------------------------
@@ -345,8 +413,11 @@ def show_produksi():
         
         if 'Date' in df_display.columns:
              # Fix AttributeError: Can only use .dt accessor with datetimelike values
-             # Since DB returns datetime.date objects, use astype(str)
-             df_display['Date'] = df_display['Date'].astype(str)
+             # Convert to datetime first, then format
+             if pd.api.types.is_datetime64_any_dtype(df_display['Date']):
+                 df_display['Date'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+             else:
+                 df_display['Date'] = df_display['Date'].astype(str)
         
         # 1. SORTING (Must be done BEFORE column selection to use 'id')
         # Display Sort: ID Ascending (Shift 3/Low ID at Top = Reverse Excel/LIFO)

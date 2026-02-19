@@ -61,8 +61,9 @@ def show_process():
     # 3. ANALYSIS & KPI
     total_rit = df_filtered['Ritase'].sum()
     
-    # Calculate Operating Hours
-    op_hours = df_filtered['Jam'].nunique()
+    # Calculate Operating Hours (unique Tanggal + Jam combinations)
+    # Using nunique() on Jam alone would undercount for multi-day ranges
+    op_hours = df_filtered.drop_duplicates(subset=['Tanggal', 'Jam']).shape[0]
     feeding_rate = (total_rit / op_hours) if op_hours > 0 else 0
     
     # Best Shift

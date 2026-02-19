@@ -266,8 +266,7 @@ def show_ritase():
                 # Group by number of DT units: sum ritase, count frequency, sum DT deployed
                 truck_perf = df_prod.groupby('Dump Truck').agg(
                     Rit=('Rit', 'sum'),
-                    Frekuensi=('Rit', 'count'),
-                    Total_DT=('Dump Truck', lambda x: pd.to_numeric(x, errors='coerce').sum())
+                    Frekuensi=('Rit', 'count')
                 ).reset_index()
                 
                 # Avg ritase per session
@@ -290,7 +289,6 @@ def show_ritase():
                         f"Konfigurasi: {int(float(r['Dump Truck']))} Dump Truck<br>"
                         f"Total Ritase: {int(r['Rit'])}<br>"
                         f"Frekuensi: {int(r['Frekuensi'])}x sesi<br>"
-                        f"Total DT Deployed: {int(r['Total_DT'])} unit<br>"
                         f"Rata-rata Rit/Sesi: {r['Avg_Rit']}"
                     ), axis=1
                 )

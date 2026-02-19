@@ -53,13 +53,25 @@ def apply_global_filters(df, date_col='Date', shift_col='Shift'):
     # 1. Filter Date
     if date_range and len(date_range) == 2 and date_col in df.columns:
         start_date, end_date = date_range
-        # Ensure date column is datetime
-        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        
+        # ROBUST DATE COMPARISON (String-based YYYY-MM-DD)
+        # This avoids datetime.date vs Timestamp vs timezone issues across OS
+        start_str = str(start_date)  # '2026-02-16'
+        end_str = str(end_date)      # '2026-02-16'
+        
+        # Convert column to string dates for comparison
+        df_copy = df.copy()
+        try:
+            # Handle various date formats: Timestamp, datetime.date, string
+            if pd.api.types.is_datetime64_any_dtype(df_copy[date_col]):
+                date_strings = df_copy[date_col].dt.strftime('%Y-%m-%d')
+            else:
+                date_strings = pd.to_datetime(df_copy[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
             
-        # Filter
-        mask = (df[date_col].dt.date >= start_date) & (df[date_col].dt.date <= end_date)
-        df = df[mask]
+            mask = (date_strings >= start_str) & (date_strings <= end_str)
+            df = df[mask]
+        except Exception as e:
+            print(f"[FILTER WARNING] Date filter error: {e}")
         
     # 2. Filter Shift
     # Check for both "All Dispatch" (corrected) and "All Displatch" (legacy typo) and "All" (just in case)
@@ -316,7 +328,6 @@ def load_produksi(start_date=None):
                 # Ensure Types
                 if 'Date' in df_db.columns:
                     df_db['Date'] = pd.to_datetime(df_db['Date'])
-                    df_db['Date'] = df_db['Date'].dt.date
                 
                 debug_log.append(f"Loaded {len(df_db)} rows from Database.")
                 debug_log.append(f"Loaded {len(df_db)} rows from Database.")
