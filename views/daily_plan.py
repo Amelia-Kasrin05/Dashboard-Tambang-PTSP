@@ -267,8 +267,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
     placed_boxes = [] # List of {x, y, w, h}
     
     # Parameters
-    BOX_W = 140 
-    BOX_H = 100 
+    BOX_W = 150 
+    BOX_H = 110 
     
     # Helper: Absolute Boundary Clamp
     def safe_clamp(val, min_val, max_val):
@@ -401,23 +401,27 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         total_h = item_count * BOX_H + (item_count - 1) * STACK_PAD
         
         # Spiral Radii - Expanded to find more space
-        radii = [130, 160, 200, 250, 320, 400, 500, 600, 700]
+        radii = [90, 100, 115, 130, 160, 200, 250, 320, 400, 500, 600, 700]
         
         # Determine logical center
         usable_center_x = (USABLE_MIN_X + USABLE_MAX_X) / 2
         
         # Angles Logic
         # User requested Priority: LEFT.
-        # Only go Right if we are heavily constrained on the Left (e.g. near left border).
+        # UPDATED: Split based on Map Center (approx 450px threshold).
+        # - Left of 450 -> Go Left.
+        # - Right of 450 -> Go Right.
         
-        if t_x < 200: 
-            # Too close to left border, forced to go Right
+        if t_x > 450: 
+            # Right side of map -> Go Right
             angles = [0, 30, 330, 60, 300, 90, 270, 180]
         else:
-             # Default: Priority Left (180), then varies
+            # Left side of map -> Go Left
             angles = [180, 150, 210, 120, 240, 90, 270, 0]
             
         full_angles = angles
+        
+
         
         # Check overrides (use first item's loc_id)
         first_ann = group_anns[0]
@@ -429,8 +433,8 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
         if loc_id == 'D6': full_angles = [0, 30, 330]    # D6 Right 
         if loc_id == 'K3': full_angles = [180, 150, 210] # K3 Left 
         if loc_id == 'M10': full_angles = [0, 30, 330]   # M10 Right (Requested)
-        if loc_id == 'F5': full_angles = [0, 30, 330, 60, 300] # F5 Right (avoid left side congestion)
-        if loc_id == 'J5': full_angles = [0, 30, 330, 60, 300] # J5 Right (avoid crossing K3 on left)
+        if loc_id == 'F5': full_angles = [0, 30, 330, 90, 270, 60, 300] # F5 Right + Vertical (closer options)
+        if loc_id == 'J5': full_angles = [0, 30, 330, 90, 270, 60, 300] # J5 Right + Vertical (closer options)
         
         best_x, best_y = t_x, t_y
         found = False
@@ -455,7 +459,7 @@ def create_mining_map(df_filtered, selected_date, selected_shifts_label):
                 
                 if not collision:
                     for b in placed_boxes:
-                        pad = 50 # Reduced to 50 for tighter packing (was 70)
+                        pad = 15 # Reduced to 15 for tighter vertical stacking (was 50)
                         
                         dist_x = abs(c_x - b['x']) * 2
                         dist_y = abs(c_y - b['y']) * 2
